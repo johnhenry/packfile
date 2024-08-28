@@ -1,0 +1,15 @@
+{
+  "name": "lemem",
+  "version": "0.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test test.mjs"
+  },
+  "keywords": [],
+  "author": "John Henry <john@iamjohnhenry.com> (https://johnhenry.github.io/)",
+  "license": "MIT",
+  "description": "",
+  "dependencies": {
+    "cbor": "^9.0.2"
+  }
+}
