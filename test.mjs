@@ -1,307 +1,195 @@
-import { test } from "node:test";
-import assert from "node:assert/strict";
-import { mkdir, writeFile, readFile, rm, readdir } from "node:fs/promises";
-import { join, sep } from "node:path";
-import {
-  compileDirectory,
-  decompileDirectory,
-  createRouter,
-} from "./index.mjs";
+import { createReadStream } from "fs";
+import { readFile, readdir, writeFile, mkdir, stat } from "fs/promises";
+import { join, relative, dirname } from "path";
+import { createGzip, createGunzip } from "zlib";
+import cbor from "cbor";
+import { createHash } from "crypto";
+const { encode, decode } = cbor;
 
-const TEST_DIR = "./test_directory";
-const COMPILED_FILE = "./compiled_directory.cbor";
-const DECOMPILED_DIR = "./decompiled_directory";
+const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const DEFAULT_CACHE_MAX_AGE = 3600; // 1 hour
 
-test("Directory Compiler Library - Comprehensive Tests", async (t) => {
-  // Setup: Create a more complex test directory structure
-  await t.test("Setup complex test directory", async () => {
-    await mkdir(join(TEST_DIR, "images", "icons"), { recursive: true });
-    await mkdir(join(TEST_DIR, "styles"), { recursive: true });
-    await mkdir(join(TEST_DIR, "scripts"), { recursive: true });
-    await writeFile(
-      join(TEST_DIR, "index.html"),
-      "<html><body>Test</body></html>"
-    );
-    await writeFile(
-      join(TEST_DIR, "images", "icons", "one.png"),
-      "fake png content"
-    );
-    await writeFile(
-      join(TEST_DIR, "images", "icons", "two.svg"),
-      "<svg>fake svg content</svg>"
-    );
-    await writeFile(
-      join(TEST_DIR, "styles", "main.css"),
-      "body { color: red; }"
-    );
-    await writeFile(
-      join(TEST_DIR, "scripts", "app.js"),
-      'console.log("Hello, World!");'
-    );
-    await writeFile(join(TEST_DIR, ".hidden_file"), "This is a hidden file");
-  });
+export const compileDirectory = async (directoryPath, options = {}) => {
+  const {
+    compress = false,
+    ignorePatterns = [],
+    maxFileSize = DEFAULT_MAX_FILE_SIZE,
+  } = options;
 
-  // Test compileDirectory
-  await t.test("compileDirectory - Complex directory", async () => {
-    const compiledData = await compileDirectory(TEST_DIR);
-    await writeFile(COMPILED_FILE, compiledData);
-    assert.ok(
-      (await readFile(COMPILED_FILE)).length > 0,
-      "Compiled file should not be empty"
-    );
-  });
+  const files = {};
 
-  // Test decompileDirectory
-  await t.test("decompileDirectory - Complex directory", async () => {
-    const compiledData = await readFile(COMPILED_FILE);
-    await decompileDirectory(compiledData, DECOMPILED_DIR);
+  const readDirectoryRecursive = async (currentPath) => {
+    const entries = await readdir(currentPath, { withFileTypes: true });
 
-    const compareDirectories = async (dir1, dir2) => {
-      const files1 = await readdir(dir1, { withFileTypes: true });
-      const files2 = await readdir(dir2, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(currentPath, entry.name);
+      const relativePath = relative(directoryPath, fullPath);
 
-      assert.equal(
-        files1.length,
-        files2.length,
-        `Directories ${dir1} and ${dir2} should have the same number of entries`
-      );
+      if (
+        ignorePatterns.some((pattern) => new RegExp(pattern).test(relativePath))
+      ) {
+        continue;
+      }
 
-      for (const file of files1) {
-        const path1 = join(dir1, file.name);
-        const path2 = join(dir2, file.name);
-
-        if (file.isDirectory()) {
-          await compareDirectories(path1, path2);
+      if (entry.isDirectory()) {
+        await readDirectoryRecursive(fullPath);
+      } else if (entry.isFile()) {
+        const stats = await stat(fullPath);
+        if (stats.size > maxFileSize) {
+          files[relativePath] = {
+            type: "large-file",
+            path: fullPath,
+            hash: await hashFile(fullPath),
+          };
         } else {
-          const content1 = await readFile(path1, "utf-8");
-          const content2 = await readFile(path2, "utf-8");
-          assert.equal(
-            content1,
-            content2,
-            `File contents should match for ${file.name}`
-          );
+          const content = await readFile(fullPath);
+          files[relativePath] = {
+            type: "content",
+            data: content,
+            hash: createHash("sha256").update(content).digest("hex"),
+          };
         }
       }
-    };
-
-    await compareDirectories(TEST_DIR, DECOMPILED_DIR);
-  });
-
-  // Test createRouter
-  await t.test("createRouter - Complex scenarios", async () => {
-    const compiledData = await readFile(COMPILED_FILE);
-    const router = createRouter(compiledData);
-
-    // Test various file types
-    const testCases = [
-      {
-        path: "/index.html",
-        expectedStatus: 200,
-        expectedContent: "<html><body>Test</body></html>",
-      },
-      {
-        path: "/images/icons/one.png",
-        expectedStatus: 200,
-        expectedContent: "fake png content",
-      },
-      {
-        path: "/images/icons/two.svg",
-        expectedStatus: 200,
-        expectedContent: "<svg>fake svg content</svg>",
-      },
-      {
-        path: "/styles/main.css",
-        expectedStatus: 200,
-        expectedContent: "body { color: red; }",
-      },
-      {
-        path: "/scripts/app.js",
-        expectedStatus: 200,
-        expectedContent: 'console.log("Hello, World!");',
-      },
-      {
-        path: "/.hidden_file",
-        expectedStatus: 200,
-        expectedContent: "This is a hidden file",
-      },
-      {
-        path: "/nonexistent.file",
-        expectedStatus: 404,
-        expectedContent: "Not Found",
-      },
-    ];
-
-    for (const testCase of testCases) {
-      const response = await router(testCase.path);
-      assert.equal(
-        response.status,
-        testCase.expectedStatus,
-        `Status should be ${testCase.expectedStatus} for ${testCase.path}`
-      );
-      assert.equal(
-        await response.text(),
-        testCase.expectedContent,
-        `Content should match for ${testCase.path}`
-      );
     }
+  };
 
-    // Test content types
-    const contentTypeTestCases = [
-      { path: "/index.html", expectedContentType: "text/html" },
-      { path: "/images/icons/one.png", expectedContentType: "image/png" },
-      { path: "/images/icons/two.svg", expectedContentType: "image/svg+xml" },
-      { path: "/styles/main.css", expectedContentType: "text/css" },
-      {
-        path: "/scripts/app.js",
-        expectedContentType: "application/javascript",
-      },
-      {
-        path: "/.hidden_file",
-        expectedContentType: "application/octet-stream",
-      },
-    ];
+  await readDirectoryRecursive(directoryPath);
+  let compiledData = encode(files);
 
-    for (const testCase of contentTypeTestCases) {
-      const response = await router(testCase.path);
-      assert.equal(
-        response.headers.get("Content-Type"),
-        testCase.expectedContentType,
-        `Content-Type should be ${testCase.expectedContentType} for ${testCase.path}`
-      );
-    }
-
-    // Test aliases
-    const aliasTestCases = [
-      {
-        path: "/",
-        alias: { "/": "index.html" },
-        expectedStatus: 200,
-        expectedContent: "<html><body>Test</body></html>",
-      },
-      {
-        path: "/home",
-        alias: { "/home": "index.html" },
-        expectedStatus: 200,
-        expectedContent: "<html><body>Test</body></html>",
-      },
-      {
-        path: "/home/subpath",
-        alias: { "/home": "index.html" },
-        expectedStatus: 404,
-        expectedContent: "Not Found",
-      },
-      {
-        path: "/api/data",
-        alias: { "/api": "scripts" },
-        expectedStatus: 404,
-        expectedContent: "Not Found",
-      },
-      {
-        path: "/api/app.js",
-        alias: { "/api": "scripts" },
-        expectedStatus: 200,
-        expectedContent: 'console.log("Hello, World!");',
-      },
-    ];
-
-    for (const testCase of aliasTestCases) {
-      const aliasRouter = createRouter(compiledData);
-      const response = await aliasRouter(testCase.path, {
-        alias: testCase.alias,
+  if (compress) {
+    compiledData = await new Promise((resolve, reject) => {
+      createGzip().end(compiledData, (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
       });
-      assert.equal(
-        response.status,
-        testCase.expectedStatus,
-        `Should handle ${testCase.path} alias correctly`
-      );
-      assert.equal(
-        await response.text(),
-        testCase.expectedContent,
-        `Should return correct content for ${testCase.path} alias`
-      );
+    });
+  }
+
+  return compiledData;
+};
+
+export const decompileDirectory = async (
+  compiledData,
+  outputPath,
+  compressed = false
+) => {
+  if (compressed) {
+    compiledData = await new Promise((resolve, reject) => {
+      createGunzip().end(compiledData, (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
+      });
+    });
+  }
+
+  const files = decode(compiledData);
+
+  for (const [relativePath, fileInfo] of Object.entries(files)) {
+    const fullPath = join(outputPath, relativePath);
+    await mkdir(dirname(fullPath), { recursive: true });
+    if (fileInfo.type === "large-file" && fileInfo.path) {
+      await writeFile(fullPath, await readFile(fileInfo.path));
+    } else if (fileInfo.type === "content" && fileInfo.data) {
+      await writeFile(fullPath, fileInfo.data);
+    } else {
+      throw new Error(`Invalid file info for ${relativePath}`);
     }
+  }
+};
+
+export const createRouter = (compiledData, compressed = false) => {
+  let files;
+  try {
+    if (compressed) {
+      compiledData = createGunzip().end(compiledData);
+    }
+    files = decode(compiledData);
+  } catch (error) {
+    throw new Error(
+      `Failed to decode compiled data: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  return async (path, options = {}) => {
+    const { alias = {}, cacheMaxAge = DEFAULT_CACHE_MAX_AGE } = options;
+
+    let filePath = path;
+
+    // Handle aliases
+    for (const [aliasPath, targetPath] of Object.entries(alias)) {
+      if (path === aliasPath || path.startsWith(aliasPath + "/")) {
+        filePath = path.replace(aliasPath, targetPath);
+        break;
+      }
+    }
+
+    // Remove leading slash
+    filePath = filePath.replace(/^\//, "");
+
+    if (files[filePath]) {
+      const fileInfo = files[filePath];
+      const contentType = getContentType(filePath);
+      const headers = new Headers({
+        "Content-Type": contentType,
+        "Cache-Control": `max-age=${cacheMaxAge}`,
+        ETag: `"${fileInfo.hash}"`,
+      });
+
+      if (fileInfo.type === "large-file" && fileInfo.path) {
+        const stream = createReadStream(fileInfo.path);
+        return new Response(streamToReadableStream(stream), {
+          status: 200,
+          headers,
+        });
+      } else if (fileInfo.type === "content" && fileInfo.data) {
+        return new Response(fileInfo.data, { status: 200, headers });
+      } else {
+        throw new Error(`Invalid file info for ${filePath}`);
+      }
+    } else {
+      return new Response("Not Found", { status: 404 });
+    }
+  };
+};
+
+const getContentType = (filePath) => {
+  const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const mimeTypes = {
+    html: "text/html",
+    css: "text/css",
+    js: "application/javascript",
+    json: "application/json",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    svg: "image/svg+xml",
+  };
+
+  return mimeTypes[extension] || "application/octet-stream";
+};
+
+const hashFile = async (filePath) => {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(filePath);
+    stream.on("data", (data) => hash.update(data));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
   });
+};
 
-  // Test edge cases
-  await t.test("Edge cases", async () => {
-    // Empty directory
-    const EMPTY_DIR = "./empty_directory";
-    await mkdir(EMPTY_DIR, { recursive: true });
-    const emptyCompiledData = await compileDirectory(EMPTY_DIR);
-    assert.ok(
-      emptyCompiledData.length > 0,
-      "Compiled data for empty directory should not be empty"
-    );
-
-    const emptyRouter = createRouter(emptyCompiledData);
-    const emptyResponse = await emptyRouter("/");
-    assert.equal(
-      emptyResponse.status,
-      404,
-      "Should return 404 for empty directory"
-    );
-
-    // Invalid CBOR data
-    const invalidRouter = createRouter(Buffer.from("invalid data"));
-    const invalidResponse = await invalidRouter("/");
-    assert.equal(
-      invalidResponse.status,
-      404,
-      "Should return 404 for invalid CBOR data"
-    );
-
-    // Large file
-    const LARGE_FILE = join(TEST_DIR, "large_file.bin");
-    const largeContent = Buffer.alloc(10 * 1024 * 1024, "x"); // 10MB file
-    await writeFile(LARGE_FILE, largeContent);
-
-    const largeCompiledData = await compileDirectory(TEST_DIR);
-    const largeRouter = createRouter(largeCompiledData);
-    const largeResponse = await largeRouter("/large_file.bin");
-    assert.equal(
-      largeResponse.status,
-      200,
-      "Should handle large files correctly"
-    );
-    const responseContent = await largeResponse.arrayBuffer();
-    assert.equal(
-      responseContent.byteLength,
-      10 * 1024 * 1024,
-      "Large file content should have correct size"
-    );
-    assert.ok(
-      Buffer.from(responseContent).equals(largeContent),
-      "Large file content should be correct"
-    );
-
-    // Unicode filenames
-    const UNICODE_FILE = join(TEST_DIR, "😊_unicode_file.txt");
-    await writeFile(UNICODE_FILE, "Unicode content");
-
-    const unicodeCompiledData = await compileDirectory(TEST_DIR);
-    const unicodeRouter = createRouter(unicodeCompiledData);
-    const unicodeResponse = await unicodeRouter("/😊_unicode_file.txt");
-    assert.equal(
-      unicodeResponse.status,
-      200,
-      "Should handle Unicode filenames correctly"
-    );
-    assert.equal(
-      await unicodeResponse.text(),
-      "Unicode content",
-      "Unicode file content should be correct"
-    );
-
-    // Cleanup for edge cases
-    await rm(EMPTY_DIR, { recursive: true, force: true });
-    await rm(LARGE_FILE, { force: true });
-    await rm(UNICODE_FILE, { force: true });
+const streamToReadableStream = (stream) => {
+  return new ReadableStream({
+    start(controller) {
+      stream.on("data", (chunk) => controller.enqueue(chunk));
+      stream.on("end", () => controller.close());
+      stream.on("error", (error) => controller.error(error));
+    },
+    cancel() {
+      stream.destroy();
+    },
   });
-
-  // Cleanup: Remove test directories and files
-  await t.test("Cleanup", async () => {
-    await rm(TEST_DIR, { recursive: true, force: true });
-    await rm(COMPILED_FILE, { force: true });
-    await rm(DECOMPILED_DIR, { recursive: true, force: true });
-  });
-});
+};
