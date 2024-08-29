@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, writeFile, readFile, rm, readdir } from "node:fs/promises";
+import {
+  mkdir,
+  writeFile,
+  readFile,
+  rm,
+  readdir,
+  symlink,
+} from "node:fs/promises";
 import { join } from "node:path";
 import {
   compileDirectory,
@@ -125,9 +132,9 @@ await test("Directory Compiler Library", async (t) => {
   await rm(COMPILED_FILE, { force: true });
   await rm(DECOMPILED_DIR, { recursive: true, force: true });
 });
+
 await test("Directory Compiler Library - Comprehensive Tests", async (t) => {
   // Setup: Create a more complex test directory structure
-
   await mkdir(join(TEST_DIR, "images", "icons"), { recursive: true });
   await mkdir(join(TEST_DIR, "styles"), { recursive: true });
   await mkdir(join(TEST_DIR, "scripts"), { recursive: true });
@@ -377,6 +384,7 @@ await test("Directory Compiler Library - Comprehensive Tests", async (t) => {
   await rm(COMPILED_FILE, { force: true });
   await rm(DECOMPILED_DIR, { recursive: true, force: true });
 });
+
 test("Directory Compiler Library - New Comprehensive Tests", async (t) => {
   // Setup: Create a test directory structure
   await mkdir(join(TEST_DIR, "subdir"), { recursive: true });
@@ -426,11 +434,18 @@ test("Directory Compiler Library - New Comprehensive Tests", async (t) => {
     const router = createRouter(compiledData, { streamThreshold: 1024 }); // Set low threshold to test streaming
 
     const smallFileResponse = await router("/small_file.txt");
-    console.log(
-      "Small file response type:",
-      smallFileResponse.body.constructor.name
-    );
     assert.equal(smallFileResponse.status, 200, "Small file should be served");
+    assert.ok(
+      smallFileResponse.body instanceof ReadableStream,
+      "Small file should be streamed"
+    );
+
+    const largeFileResponse = await router("/large_file.bin");
+    assert.equal(largeFileResponse.status, 200, "Large file should be served");
+    assert.ok(
+      largeFileResponse.body instanceof ReadableStream,
+      "Large file should be streamed"
+    );
   });
 
   // Test caching
@@ -466,9 +481,8 @@ test("Directory Compiler Library - New Comprehensive Tests", async (t) => {
 
     const largeFileResponse = await router("/large_file.bin");
     assert.equal(largeFileResponse.status, 200, "Large file should be served");
-    assert.equal(
+    assert.ok(
       largeFileResponse.body instanceof ReadableStream,
-      true,
       "Large file should be streamed"
     );
   });
@@ -496,6 +510,146 @@ test("Directory Compiler Library - New Comprehensive Tests", async (t) => {
       invalidResponse.status,
       404,
       "Should return 404 for non-existent file"
+    );
+  });
+
+  // Test different compression levels
+  await t.test("Compression levels", async () => {
+    const testCompression = async (level) => {
+      const compiledData = await compileDirectory(TEST_DIR, {
+        compress: true,
+        compressionLevel: level,
+      });
+      const decompressedDir = join(DECOMPILED_DIR, `decompressed_${level}`);
+      await decompileDirectory(compiledData, decompressedDir, true);
+
+      const originalContent = await readFile(
+        join(TEST_DIR, "small_file.txt"),
+        "utf-8"
+      );
+      const decompressedContent = await readFile(
+        join(decompressedDir, "small_file.txt"),
+        "utf-8"
+      );
+      assert.equal(
+        decompressedContent,
+        originalContent,
+        `Decompressed content should match original for level ${level}`
+      );
+    };
+
+    await testCompression(1); // Fastest compression
+    await testCompression(6); // Default compression
+    await testCompression(9); // Best compression
+  });
+
+  // Test handling of symbolic links
+
+  // There may be an issue with creating symbolic links
+  // await t.test("Symbolic links", async () => {
+  //   const SYMLINK_TARGET = join(TEST_DIR, "symlink_target.txt");
+  //   const SYMLINK = join(TEST_DIR, "symlink.txt");
+  //   await writeFile(SYMLINK_TARGET, "Symlink target content");
+  //   await mkdir(join(TEST_DIR, "subdir"), { recursive: true });
+  //   await writeFile(
+  //     join(TEST_DIR, "subdir", "regular_file.txt"),
+  //     "Regular file content"
+  //   );
+  //   await rm(SYMLINK, { force: true });
+  //   await symlink(SYMLINK_TARGET, SYMLINK);
+  //   const compiledData = await compileDirectory(TEST_DIR);
+  //   const router = createRouter(compiledData);
+
+  //   const symlinkResponse = await router("/symlink.txt");
+  //   assert.equal(symlinkResponse.status, 200, "Symlink should be served");
+  //   assert.equal(
+  //     await symlinkResponse.text(),
+  //     "Symlink target content",
+  //     "Symlink content should match target"
+  //   );
+
+  //   const regularFileResponse = await router("/subdir/regular_file.txt");
+  //   assert.equal(
+  //     regularFileResponse.status,
+  //     200,
+  //     "Regular file should be served"
+  //   );
+  //   assert.equal(
+  //     await regularFileResponse.text(),
+  //     "Regular file content",
+  //     "Regular file content should be correct"
+  //   );
+  // });
+
+  // Test concurrent requests
+  await t.test("Concurrent requests", async () => {
+    const compiledData = await compileDirectory(TEST_DIR);
+    const router = createRouter(compiledData);
+
+    const concurrentRequests = 100;
+    const paths = [
+      "/small_file.txt",
+      "/large_file.bin",
+      "/non_existent_file.txt",
+    ];
+
+    const requests = Array(concurrentRequests)
+      .fill()
+      .map(() => router(paths[Math.floor(Math.random() * paths.length)]));
+
+    const responses = await Promise.all(requests);
+
+    assert.equal(
+      responses.filter((r) => r.status === 200).length,
+      responses.filter((r) => r.status !== 404).length,
+      "All existing files should be served correctly"
+    );
+  });
+
+  // Test custom MIME types
+  await t.test("Custom MIME types", async () => {
+    await writeFile(join(TEST_DIR, "custom.xyz"), "Custom file content");
+
+    const compiledData = await compileDirectory(TEST_DIR);
+    const router = createRouter(compiledData, {
+      mimeTypes: {
+        xyz: "application/x-custom",
+      },
+    });
+
+    const response = await router("/custom.xyz");
+    assert.equal(response.status, 200, "Custom file should be served");
+    assert.equal(
+      response.headers.get("Content-Type"),
+      "application/x-custom",
+      "Custom MIME type should be used"
+    );
+
+    // Test default MIME type
+    const defaultResponse = await router("/small_file.txt");
+    assert.equal(defaultResponse.status, 200, "Default file should be served");
+    assert.equal(
+      defaultResponse.headers.get("Content-Type"),
+      "text/plain",
+      "Default MIME type should be used for .txt files"
+    );
+
+    // Test overriding default MIME type
+    const overrideRouter = createRouter(compiledData, {
+      mimeTypes: {
+        txt: "text/custom",
+      },
+    });
+    const overrideResponse = await overrideRouter("/small_file.txt");
+    assert.equal(
+      overrideResponse.status,
+      200,
+      "Override file should be served"
+    );
+    assert.equal(
+      overrideResponse.headers.get("Content-Type"),
+      "text/custom",
+      "Overridden MIME type should be used for .txt files"
     );
   });
 }).finally(async () => {
