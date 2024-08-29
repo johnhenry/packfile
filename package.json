@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node --test test.mjs"
+    "test": "node --test test.mjs",
+    "demo:server": "node demo/server.mjs",
+    "demo:browser": "npx serve ."
   },
   "keywords": [],
   "author": "John Henry <john@iamjohnhenry.com> (https://johnhenry.github.io/)",

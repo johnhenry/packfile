@@ -32,8 +32,8 @@
     <!-- optional -->
     <script src="https://unpkg.com/cbor-web"></script>
     <script type="module">
-      import { createRouter } from "./browser/index.mjs";
-      const PATH_TO_FILE = "./sampleapp/compiled.cbor";
+      import { createRouter } from "./lib/browser.mjs";
+      const PATH_TO_FILE = "./demo/compiled.cbor";
       const compiledDirectory = await fetch(PATH_TO_FILE).then((response) =>
         response.arrayBuffer()
       );
