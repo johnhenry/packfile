@@ -14,6 +14,11 @@ export type CompileOptions = {
 };
 
 export type RouterOptions = {
+  compressed?: boolean;
+  cacheControl?: string;
+  streamThreshold?: number;
+};
+
+export type RouteOptions = {
   alias?: { [key: string]: string };
-  cacheMaxAge?: number;
 };

@@ -5,15 +5,9 @@ import { createGzip, createGunzip } from "zlib";
 import cbor from "cbor";
 import { createHash } from "crypto";
 const { encode, decode } = cbor;
-
 const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const DEFAULT_CACHE_MAX_AGE = 3600; // 1 hour
 
-/**
- * @param {string} directoryPath
- * @param {CompileOptions} [options]
- * @returns {Promise<Buffer>}
- */
 export const compileDirectory = async (directoryPath, options = {}) => {
   const {
     compress = false,
@@ -21,7 +15,6 @@ export const compileDirectory = async (directoryPath, options = {}) => {
     maxFileSize = DEFAULT_MAX_FILE_SIZE,
   } = options;
 
-  /** @type {CompiledFiles} */
   const files = {};
 
   const readDirectoryRecursive = async (currentPath) => {
@@ -59,64 +52,65 @@ export const compileDirectory = async (directoryPath, options = {}) => {
     }
   };
 
-  await readDirectoryRecursive(directoryPath);
-  let compiledData = encode(files);
+  try {
+    await readDirectoryRecursive(directoryPath);
+    let compiledData = encode(files);
 
-  if (compress) {
-    compiledData = await new Promise((resolve, reject) => {
-      createGzip().end(compiledData, (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
+    if (compress) {
+      compiledData = await new Promise((resolve, reject) => {
+        createGzip().end(compiledData, (err, result) => {
+          if (err) reject(new Error(`Compression failed: ${err.message}`));
+          else resolve(result);
+        });
       });
-    });
-  }
+    }
 
-  return compiledData;
+    return compiledData;
+  } catch (error) {
+    throw new Error(`Failed to compile directory: ${error.message}`);
+  }
 };
 
-/**
- * @param {Buffer} compiledData
- * @param {string} outputPath
- * @param {boolean} [compressed]
- * @returns {Promise<void>}
- */
 export const decompileDirectory = async (
   compiledData,
   outputPath,
   compressed = false
 ) => {
-  if (compressed) {
-    compiledData = await new Promise((resolve, reject) => {
-      createGunzip().end(compiledData, (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
+  try {
+    if (compressed) {
+      compiledData = await new Promise((resolve, reject) => {
+        createGunzip().end(compiledData, (err, result) => {
+          if (err) reject(new Error(`Decompression failed: ${err.message}`));
+          else resolve(result);
+        });
       });
-    });
-  }
-
-  /** @type {CompiledFiles} */
-  const files = decode(compiledData);
-
-  for (const [relativePath, fileInfo] of Object.entries(files)) {
-    const fullPath = join(outputPath, relativePath);
-    await mkdir(dirname(fullPath), { recursive: true });
-    if (fileInfo.type === "large-file" && fileInfo.path) {
-      await writeFile(fullPath, await readFile(fileInfo.path));
-    } else if (fileInfo.type === "content" && fileInfo.data) {
-      await writeFile(fullPath, fileInfo.data);
-    } else {
-      throw new Error(`Invalid file info for ${relativePath}`);
     }
+
+    const files = decode(compiledData);
+
+    for (const [relativePath, fileInfo] of Object.entries(files)) {
+      const fullPath = join(outputPath, relativePath);
+      await mkdir(dirname(fullPath), { recursive: true });
+      if (fileInfo.type === "large-file" && fileInfo.path) {
+        await writeFile(fullPath, await readFile(fileInfo.path));
+      } else if (fileInfo.type === "content" && fileInfo.data) {
+        await writeFile(fullPath, fileInfo.data);
+      } else {
+        throw new Error(`Invalid file info for ${relativePath}`);
+      }
+    }
+  } catch (error) {
+    throw new Error(`Failed to decompile directory: ${error.message}`);
   }
 };
 
-/**
- * @param {Buffer} compiledData
- * @param {boolean} [compressed]
- * @returns {function(string, RouterOptions): Promise<Response>}
- */
-export const createRouter = (compiledData, compressed = false) => {
-  /** @type {CompiledFiles} */
+export const createRouter = (compiledData, options = {}) => {
+  const {
+    compressed = false,
+    cacheControl = `max-age=${DEFAULT_CACHE_MAX_AGE}`,
+    streamThreshold = DEFAULT_MAX_FILE_SIZE,
+  } = options;
+
   let files;
   try {
     if (compressed) {
@@ -124,15 +118,11 @@ export const createRouter = (compiledData, compressed = false) => {
     }
     files = decode(compiledData);
   } catch (error) {
-    throw new Error(
-      `Failed to decode compiled data: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
+    throw new Error(`Failed to decode compiled data: ${error.message}`);
   }
 
-  return async (path, options = {}) => {
-    const { alias = {}, cacheMaxAge = DEFAULT_CACHE_MAX_AGE } = options;
+  return async (path, routeOptions = {}) => {
+    const { alias = {} } = routeOptions;
 
     let filePath = path;
 
@@ -152,7 +142,7 @@ export const createRouter = (compiledData, compressed = false) => {
       const contentType = getContentType(filePath);
       const headers = new Headers({
         "Content-Type": contentType,
-        "Cache-Control": `max-age=${cacheMaxAge}`,
+        "Cache-Control": cacheControl,
         ETag: `"${fileInfo.hash}"`,
       });
 
@@ -163,7 +153,15 @@ export const createRouter = (compiledData, compressed = false) => {
           headers,
         });
       } else if (fileInfo.type === "content" && fileInfo.data) {
-        return new Response(fileInfo.data, { status: 200, headers });
+        if (fileInfo.data.length > streamThreshold) {
+          const stream = streamFromBuffer(fileInfo.data);
+          return new Response(streamToReadableStream(stream), {
+            status: 200,
+            headers,
+          });
+        } else {
+          return new Response(fileInfo.data, { status: 200, headers });
+        }
       } else {
         throw new Error(`Invalid file info for ${filePath}`);
       }
@@ -173,10 +171,6 @@ export const createRouter = (compiledData, compressed = false) => {
   };
 };
 
-/**
- * @param {string} filePath
- * @returns {string}
- */
 const getContentType = (filePath) => {
   const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
   const mimeTypes = {
@@ -194,11 +188,7 @@ const getContentType = (filePath) => {
   return mimeTypes[extension] || "application/octet-stream";
 };
 
-/**
- * @param {string} filePath
- * @returns {Promise<string>}
- */
-const hashFile = (filePath) => {
+const hashFile = async (filePath) => {
   return new Promise((resolve, reject) => {
     const hash = createHash("sha256");
     const stream = createReadStream(filePath);
@@ -208,10 +198,6 @@ const hashFile = (filePath) => {
   });
 };
 
-/**
- * @param {import('fs').ReadStream} stream
- * @returns {ReadableStream}
- */
 const streamToReadableStream = (stream) => {
   return new ReadableStream({
     start(controller) {
@@ -221,6 +207,16 @@ const streamToReadableStream = (stream) => {
     },
     cancel() {
       stream.destroy();
+    },
+  });
+};
+
+const streamFromBuffer = (buffer) => {
+  const stream = require("stream");
+  return new stream.Readable({
+    read() {
+      this.push(buffer);
+      this.push(null);
     },
   });
 };

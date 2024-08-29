@@ -3,9 +3,10 @@ import {
   CompiledFiles,
   CompileOptions,
   RouterOptions,
+  RouteOptions,
 } from "./types";
 
-export { FileInfo, CompiledFiles, CompileOptions, RouterOptions };
+export { FileInfo, CompiledFiles, CompileOptions, RouterOptions, RouteOptions };
 
 export function compileDirectory(
   directoryPath: string,
@@ -18,5 +19,5 @@ export function decompileDirectory(
 ): Promise<void>;
 export function createRouter(
   compiledData: Buffer,
-  compressed?: boolean
-): (path: string, options?: RouterOptions) => Promise<Response>;
+  options?: RouterOptions
+): (path: string, routeOptions?: RouteOptions) => Promise<Response>;
