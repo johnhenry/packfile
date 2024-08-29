@@ -11,5 +11,9 @@
   "description": "",
   "dependencies": {
     "cbor": "^9.0.2"
+  },
+  "devDependencies": {
+    "express": "^4.19.2",
+    "theres-waldo": "^0.0.0"
   }
 }

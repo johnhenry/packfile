@@ -14,32 +14,28 @@ const DECOMPILED_DIR = "./decompiled_directory";
 
 test("Directory Compiler Library - Comprehensive Tests", async (t) => {
   // Setup: Create a more complex test directory structure
-  await t.test("Setup complex test directory", async () => {
-    await mkdir(join(TEST_DIR, "images", "icons"), { recursive: true });
-    await mkdir(join(TEST_DIR, "styles"), { recursive: true });
-    await mkdir(join(TEST_DIR, "scripts"), { recursive: true });
-    await writeFile(
-      join(TEST_DIR, "index.html"),
-      "<html><body>Test</body></html>"
-    );
-    await writeFile(
-      join(TEST_DIR, "images", "icons", "one.png"),
-      "fake png content"
-    );
-    await writeFile(
-      join(TEST_DIR, "images", "icons", "two.svg"),
-      "<svg>fake svg content</svg>"
-    );
-    await writeFile(
-      join(TEST_DIR, "styles", "main.css"),
-      "body { color: red; }"
-    );
-    await writeFile(
-      join(TEST_DIR, "scripts", "app.js"),
-      'console.log("Hello, World!");'
-    );
-    await writeFile(join(TEST_DIR, ".hidden_file"), "This is a hidden file");
-  });
+
+  await mkdir(join(TEST_DIR, "images", "icons"), { recursive: true });
+  await mkdir(join(TEST_DIR, "styles"), { recursive: true });
+  await mkdir(join(TEST_DIR, "scripts"), { recursive: true });
+  await writeFile(
+    join(TEST_DIR, "index.html"),
+    "<html><body>Test</body></html>"
+  );
+  await writeFile(
+    join(TEST_DIR, "images", "icons", "one.png"),
+    "fake png content"
+  );
+  await writeFile(
+    join(TEST_DIR, "images", "icons", "two.svg"),
+    "<svg>fake svg content</svg>"
+  );
+  await writeFile(join(TEST_DIR, "styles", "main.css"), "body { color: red; }");
+  await writeFile(
+    join(TEST_DIR, "scripts", "app.js"),
+    'console.log("Hello, World!");'
+  );
+  await writeFile(join(TEST_DIR, ".hidden_file"), "This is a hidden file");
 
   // Test compileDirectory
   await t.test("compileDirectory - Complex directory", async () => {

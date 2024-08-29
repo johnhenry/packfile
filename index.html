@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Le Mem Demo</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        padding: 20px;
+      }
+      #frame-container {
+        margin-top: 20px;
+      }
+      iframe {
+        width: 100%;
+        height: 400px;
+        border: 1px solid #ddd;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Le Mem Demo</h1>
+    <nav>
+      <a href="#index.html">Home</a> | <a href="#page1.html">Page 1</a> |
+      <a href="#page2.html">Page 2</a> | <a href="#logo.jpeg">Logo</a>
+    </nav>
+    <div id="frame-container">
+      <iframe id="content-frame"></iframe>
+    </div>
+    <!-- <script src="https://unpkg.com/bignumber.js"></script> -->
+    <!-- optional -->
+    <script src="https://unpkg.com/cbor-web"></script>
+    <script type="module">
+      import { createRouter } from "./browser/index.mjs";
+      const PATH_TO_FILE = "./sampleapp/compiled.cbor";
+      const compiledDirectory = await fetch(PATH_TO_FILE).then((response) =>
+        response.arrayBuffer()
+      );
+      const router = createRouter(compiledDirectory);
+      const iframe = document.getElementById("content-frame");
+      const update = async (path) => {
+        const response = await router(path, {
+          alias: { "/": "index.html" },
+        }); // returns HTTP response object representing the file
+        // console.log(await response.text());
+        const data =
+          "data:" +
+          response.headers.get("content-type") +
+          ";base64," +
+          (await response.arrayBuffer().then((buffer) => {
+            const uint8Array = new Uint8Array(buffer);
+            const binaryString = uint8Array.reduce(
+              (str, byte) => str + String.fromCharCode(byte),
+              ""
+            );
+            const base64String = btoa(binaryString);
+            return base64String;
+          }));
+        iframe.src = data;
+      };
+      window.addEventListener("hashchange", async () => {
+        const path = window.location.hash.slice(1) || "index.html";
+        update(path);
+      });
+
+      // Initial load
+      if (window.location.hash) {
+        const path = window.location.hash.slice(1);
+        update(path);
+      }
+    </script>
+  </body>
+</html>

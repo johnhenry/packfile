@@ -1,16 +1,16 @@
 import { createReadStream } from "fs";
 import { readFile, readdir, writeFile, mkdir, stat } from "fs/promises";
 import { join, relative, dirname } from "path";
-import { createGzip, createGunzip } from "zlib";
 import cbor from "cbor";
 import { createHash } from "crypto";
-const { encode, decode } = cbor;
+import { compressObject, deCompressObject } from "./compression.mjs";
+
 const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const DEFAULT_CACHE_MAX_AGE = 3600; // 1 hour
 
 export const compileDirectory = async (directoryPath, options = {}) => {
   const {
-    compress = false,
+    compress = true,
     ignorePatterns = [],
     maxFileSize = DEFAULT_MAX_FILE_SIZE,
   } = options;
@@ -38,6 +38,7 @@ export const compileDirectory = async (directoryPath, options = {}) => {
           files[relativePath] = {
             type: "large-file",
             path: fullPath,
+            size: stats.size,
             hash: await hashFile(fullPath),
           };
         } else {
@@ -45,6 +46,7 @@ export const compileDirectory = async (directoryPath, options = {}) => {
           files[relativePath] = {
             type: "content",
             data: content,
+            size: stats.size,
             hash: createHash("sha256").update(content).digest("hex"),
           };
         }
@@ -54,15 +56,10 @@ export const compileDirectory = async (directoryPath, options = {}) => {
 
   try {
     await readDirectoryRecursive(directoryPath);
-    let compiledData = encode(files);
+    let compiledData = await cbor.encode(files);
 
     if (compress) {
-      compiledData = await new Promise((resolve, reject) => {
-        createGzip().end(compiledData, (err, result) => {
-          if (err) reject(new Error(`Compression failed: ${err.message}`));
-          else resolve(result);
-        });
-      });
+      compiledData = await compressObject(compiledData);
     }
 
     return compiledData;
@@ -74,19 +71,14 @@ export const compileDirectory = async (directoryPath, options = {}) => {
 export const decompileDirectory = async (
   compiledData,
   outputPath,
-  compressed = false
+  compressed = true
 ) => {
   try {
     if (compressed) {
-      compiledData = await new Promise((resolve, reject) => {
-        createGunzip().end(compiledData, (err, result) => {
-          if (err) reject(new Error(`Decompression failed: ${err.message}`));
-          else resolve(result);
-        });
-      });
+      compiledData = await deCompressObject(compiledData);
     }
 
-    const files = decode(compiledData);
+    const files = await cbor.decode(compiledData);
 
     for (const [relativePath, fileInfo] of Object.entries(files)) {
       const fullPath = join(outputPath, relativePath);
@@ -103,26 +95,37 @@ export const decompileDirectory = async (
     throw new Error(`Failed to decompile directory: ${error.message}`);
   }
 };
-
 export const createRouter = (compiledData, options = {}) => {
   const {
-    compressed = false,
+    compressed = true,
     cacheControl = `max-age=${DEFAULT_CACHE_MAX_AGE}`,
     streamThreshold = DEFAULT_MAX_FILE_SIZE,
   } = options;
 
   let files;
-  try {
-    if (compressed) {
-      compiledData = createGunzip().end(compiledData);
+  const decodeData = async () => {
+    try {
+      if (compressed) {
+        compiledData = await deCompressObject(compiledData);
+      }
+      files = await cbor.decode(compiledData);
+    } catch (error) {
+      throw new Error(`Failed to decode compiled data: ${error.message}`);
     }
-    files = decode(compiledData);
-  } catch (error) {
-    throw new Error(`Failed to decode compiled data: ${error.message}`);
-  }
+  };
 
   return async (path, routeOptions = {}) => {
+    if (typeof path !== "string") {
+      if (path.method !== "GET") {
+        throw new Error("Method GET not satisfied.");
+      }
+      path = new URL(path.url).pathname;
+    }
     const { alias = {} } = routeOptions;
+
+    if (!files) {
+      await decodeData();
+    }
 
     let filePath = path;
 
@@ -153,7 +156,7 @@ export const createRouter = (compiledData, options = {}) => {
           headers,
         });
       } else if (fileInfo.type === "content" && fileInfo.data) {
-        if (fileInfo.data.length > streamThreshold) {
+        if (fileInfo.size > streamThreshold) {
           const stream = streamFromBuffer(fileInfo.data);
           return new Response(streamToReadableStream(stream), {
             status: 200,
@@ -183,6 +186,7 @@ const getContentType = (filePath) => {
     jpeg: "image/jpeg",
     gif: "image/gif",
     svg: "image/svg+xml",
+    txt: "text/plain",
   };
 
   return mimeTypes[extension] || "application/octet-stream";
@@ -212,8 +216,8 @@ const streamToReadableStream = (stream) => {
 };
 
 const streamFromBuffer = (buffer) => {
-  const stream = require("stream");
-  return new stream.Readable({
+  const { Readable } = require("stream");
+  return new Readable({
     read() {
       this.push(buffer);
       this.push(null);

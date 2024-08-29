@@ -1,15 +1,15 @@
-import express from "express";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import express from "express";
 import { createRouter } from "../index.mjs";
+import theresWaldo from "theres-waldo";
+const { dir } = theresWaldo(import.meta.url);
 
 const app = express();
 const port = 3000;
 
-const compiledData = readFileSync("./compiled.cbor");
+const compiledData = readFileSync(join(dir, "./compiled.cbor"));
 const router = createRouter(compiledData, { compressed: true });
-
-const res = await router("/index.html");
-
 app.get("/compiled/*", async (req, res) => {
   const path = req.params[0];
   try {
@@ -21,9 +21,7 @@ app.get("/compiled/*", async (req, res) => {
     res.status(404).send("File not found");
   }
 });
-
-app.use(express.static("public"));
-
+app.use(express.static(dir));
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
 });
