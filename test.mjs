@@ -392,7 +392,9 @@ test("Directory Compiler Library - New Comprehensive Tests", async (t) => {
 
   // Test compression
   await t.test("Compression", async () => {
-    const uncompressedData = await compileDirectory(TEST_DIR);
+    const uncompressedData = await compileDirectory(TEST_DIR, {
+      compress: false,
+    });
     const compressedData = await compileDirectory(TEST_DIR);
 
     assert.ok(
