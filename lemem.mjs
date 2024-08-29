@@ -8,6 +8,7 @@ import { deCompressObject } from "./lib/compression.mjs";
 import express from "express";
 import { createRouter } from "./index.mjs";
 import cbor from "cbor";
+import { constants } from "zlib";
 
 // Simple logging function
 function log(level, message) {
@@ -15,10 +16,10 @@ function log(level, message) {
   console[level](`[${timestamp}] ${level.toUpperCase()}: ${message}`);
 }
 
-async function compressFolder(inputPath, outputPath) {
+async function compressFolder(inputPath, outputPath, compressionLevel) {
   try {
     log('info', `Starting compression of folder ${inputPath}`);
-    const compiledData = await compileDirectory(inputPath, { compress: true });
+    const compiledData = await compileDirectory(inputPath, { compress: true, compressionLevel });
     writeFileSync(outputPath, compiledData);
     log('info', `Successfully compressed folder ${inputPath} to ${outputPath}`);
   } catch (error) {
@@ -85,10 +86,14 @@ const [, , command, ...args] = process.argv;
 try {
   switch (command) {
     case "compress":
-      if (args.length !== 2) {
-        throw new Error("Usage: lemem compress <path-to-folder> <path-to-file>");
+      if (args.length < 2 || args.length > 3) {
+        throw new Error("Usage: lemem compress <path-to-folder> <path-to-file> [compression-level]");
       }
-      compressFolder(args[0], args[1]);
+      const compressionLevel = args[2] ? parseInt(args[2]) : constants.Z_DEFAULT_COMPRESSION;
+      if (isNaN(compressionLevel) || compressionLevel < 0 || compressionLevel > 9) {
+        throw new Error("Compression level must be a number between 0 and 9");
+      }
+      compressFolder(args[0], args[1], compressionLevel);
       break;
     case "decompress":
       if (args.length !== 2) {
