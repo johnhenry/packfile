@@ -9,8 +9,7 @@
     "test": "node --test test.mjs",
     "demo:compile": "node demo/compile.mjs",
     "demo:server": "node demo/server.mjs",
-    "demo:browser": "npx serve .",
-    "lemem": "node cli.mjs"
+    "demo:browser": "npx serve ."
   },
   "keywords": [],
   "author": "John Henry <john@iamjohnhenry.com> (https://johnhenry.github.io/)",
