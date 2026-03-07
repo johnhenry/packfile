@@ -1,6 +1,7 @@
 {
   "name": "lemem",
   "version": "0.0.0",
+  "type": "module",
   "main": "index.mjs",
   "bin": {
     "lemem": "lemem.mjs"
@@ -19,11 +20,24 @@
     "cbor": "^9.0.2"
   },
   "devDependencies": {
-    "express": "^4.19.2",
     "theres-waldo": "^0.0.0"
   },
   "exports": {
     ".": "./index.mjs",
-    "./browser": "./lib/browser.mjs"
-  }
+    "./browser": "./browser.mjs",
+    "./compat": "./compat.mjs",
+    "./cache": "./cache.mjs",
+    "./hash": "./lib/hash.mjs",
+    "./compression": "./lib/compression.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "browser.mjs",
+    "compat.mjs",
+    "cache.mjs",
+    "lemem.mjs",
+    "lib/",
+    "README.md",
+    "LICENSE"
+  ]
 }
