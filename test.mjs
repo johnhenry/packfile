@@ -18,6 +18,7 @@ import {
   compileDirectory,
   decompileDirectory,
 } from "./index.mjs";
+import { createBlobPreview } from "./lib/blob-preview.mjs";
 
 const TEST_DIR = "./test_directory";
 const DECOMPILED_DIR = "./decompiled_directory";
@@ -678,3 +679,341 @@ await test("fromArchive path validation", async (t) => {
 }).finally(async () => {
   await rm(DECOMPILED_DIR, { recursive: true, force: true }).catch(() => {});
 });
+
+// ---------------------------------------------------------------------------
+// createBlobPreview
+//
+// Real behavioral coverage, not shape-only: `Blob`/`URL.createObjectURL()`
+// are real globals under this repo's Node version (confirmed directly:
+// `node -e "console.log(typeof Blob, typeof URL.createObjectURL)"` prints
+// "function function"), so every assertion below fetches an actual
+// `blob:` URL and inspects its actual bytes, the same way
+// virtual-module-registry.test.mjs in the sibling `andbox` package
+// verifies its own blob-minting and dispose() behavior.
+// ---------------------------------------------------------------------------
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+/** Build an eager `Map<string, FileEntry>` from a plain {path: text|Uint8Array} object. */
+function mapOf(filesObj) {
+  const map = new Map();
+  for (const [path, content] of Object.entries(filesObj)) {
+    const data = typeof content === "string" ? enc.encode(content) : content;
+    map.set(path, { data, size: data.length, hash: path });
+  }
+  return map;
+}
+
+async function textOf(url) {
+  return (await fetch(url)).text();
+}
+
+await test("createBlobPreview — multi-file bundle (HTML + CSS + JS importing JS)", async (t) => {
+  const files = mapOf({
+    "index.html": `<!DOCTYPE html><html><head>
+<link rel="stylesheet" href="./style.css">
+</head><body>
+<script src="./app.js"></script>
+</body></html>`,
+    "style.css": `body { background: url("assets/bg.png"); }`,
+    "app.js": `import { helper } from "./helper.js";\nexport const result = helper();`,
+    "helper.js": `export function helper() { return 42; }`,
+    "assets/bg.png": new Uint8Array([1, 2, 3, 4]),
+  });
+
+  let preview;
+  await t.test("root blob URL's fetched content has every relative reference rewritten", async () => {
+    preview = await createBlobPreview(files);
+    assert.match(preview.entryUrl, /^blob:/);
+    assert.equal(preview.entryUrl, preview.resolve("index.html"));
+
+    const html = await textOf(preview.entryUrl);
+    assert.match(html, /<link rel="stylesheet" href="blob:[^"]+">/);
+    assert.match(html, /<script src="blob:[^"]+"><\/script>/);
+    assert.doesNotMatch(html, /\.\/style\.css/);
+    assert.doesNotMatch(html, /\.\/app\.js/);
+  });
+
+  await t.test("fetching the rewritten CSS blob URL returns CSS with url() rewritten", async () => {
+    const css = await textOf(preview.resolve("style.css"));
+    assert.match(css, /url\("blob:[^"]+"\)/);
+    assert.equal(css.match(/url\("([^"]+)"\)/)[1], preview.resolve("assets/bg.png"));
+  });
+
+  await t.test("the image url() blob resolves to the exact original bytes", async () => {
+    const res = await fetch(preview.resolve("assets/bg.png"));
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    assert.deepEqual(bytes, new Uint8Array([1, 2, 3, 4]));
+  });
+
+  await t.test("script src points at the SAME blob URL andbox's registry minted for app.js — not a duplicate", async () => {
+    assert.equal(preview.resolve("app.js"), preview.registry.resolve("app.js"));
+  });
+
+  await t.test("JS blob content is the original, unmodified source (JS import specifiers are not rewritten)", async () => {
+    const appJs = await textOf(preview.resolve("app.js"));
+    assert.equal(appJs, `import { helper } from "./helper.js";\nexport const result = helper();`);
+  });
+
+  await t.test("andbox's registry.resolveSpecifier() still resolves the JS->JS relative import, exposed for advanced use", async () => {
+    assert.equal(
+      preview.registry.resolveSpecifier("./helper.js", "app.js"),
+      preview.resolve("helper.js")
+    );
+  });
+
+  await t.test("dispose() revokes every URL it minted, including ones delegated to the andbox registry", async () => {
+    const urls = ["index.html", "style.css", "app.js", "helper.js", "assets/bg.png"].map((p) =>
+      preview.resolve(p)
+    );
+    preview.dispose();
+    for (const url of urls) {
+      await assert.rejects(() => fetch(url), `${url} should be revoked after dispose()`);
+    }
+  });
+});
+
+await test("createBlobPreview — untouched reference kinds", async (t) => {
+  await t.test("absolute http(s)://, //, #fragment, mailto:, data:, and blob: are left byte-identical", async () => {
+    const files = mapOf({
+      "index.html": `<a href="https://example.com/x">a</a>
+<a href="http://example.com/y">b</a>
+<a href="//cdn.example.com/z">c</a>
+<a href="#section">d</a>
+<a href="mailto:john@iamjohnhenry.com">e</a>
+<a href="data:text/plain,hello">f</a>
+<a href="blob:https://example.com/already-a-blob">g</a>`,
+    });
+    const preview = await createBlobPreview(files);
+    const html = await textOf(preview.entryUrl);
+    assert.match(html, /href="https:\/\/example\.com\/x"/);
+    assert.match(html, /href="http:\/\/example\.com\/y"/);
+    assert.match(html, /href="\/\/cdn\.example\.com\/z"/);
+    assert.match(html, /href="#section"/);
+    assert.match(html, /href="mailto:john@iamjohnhenry\.com"/);
+    assert.match(html, /href="data:text\/plain,hello"/);
+    assert.match(html, /href="blob:https:\/\/example\.com\/already-a-blob"/);
+    preview.dispose();
+  });
+
+  await t.test("query-only reference (?x=1) is left untouched", async () => {
+    const files = mapOf({ "index.html": `<a href="?tab=2">t</a>` });
+    const preview = await createBlobPreview(files);
+    const html = await textOf(preview.entryUrl);
+    assert.match(html, /href="\?tab=2"/);
+    preview.dispose();
+  });
+});
+
+await test("createBlobPreview — root-relative (leading /) references resolve against the FilesMap root", async (t) => {
+  await t.test("a leading-/ href resolves to the file at that root-relative path", async () => {
+    const files = mapOf({
+      "sub/page.html": `<a href="/index.html">home</a>`,
+      "index.html": `<p>home</p>`,
+    });
+    const preview = await createBlobPreview(files);
+    const html = await textOf(preview.resolve("sub/page.html"));
+    assert.equal(html, `<a href="${preview.resolve("index.html")}">home</a>`);
+    preview.dispose();
+  });
+});
+
+await test("createBlobPreview — nested subdirectories resolve relative to the referencing file's own directory", async (t) => {
+  await t.test("../ and same-directory references both resolve correctly", async () => {
+    const files = mapOf({
+      "pages/deep/index.html": `<link rel="stylesheet" href="../../shared/style.css">
+<img src="./local.png">`,
+      "shared/style.css": `body{}`,
+      "pages/deep/local.png": new Uint8Array([9]),
+    });
+    const preview = await createBlobPreview(files, { rootPath: "pages/deep/index.html" });
+    const html = await textOf(preview.resolve("pages/deep/index.html"));
+    assert.match(html, new RegExp(`href="${escapeRe(preview.resolve("shared/style.css"))}"`));
+    assert.match(html, new RegExp(`src="${escapeRe(preview.resolve("pages/deep/local.png"))}"`));
+    preview.dispose();
+  });
+});
+
+await test("createBlobPreview — srcset rewrites every candidate URL, preserving descriptors", async (t) => {
+  await t.test("multi-candidate srcset", async () => {
+    const files = mapOf({
+      "index.html": `<img src="a.png" srcset="a.png 1x, b.png 2x">`,
+      "a.png": new Uint8Array([1]),
+      "b.png": new Uint8Array([2]),
+    });
+    const preview = await createBlobPreview(files);
+    const html = await textOf(preview.entryUrl);
+    assert.match(
+      html,
+      new RegExp(`srcset="${escapeRe(preview.resolve("a.png"))} 1x, ${escapeRe(preview.resolve("b.png"))} 2x"`)
+    );
+    preview.dispose();
+  });
+});
+
+await test("createBlobPreview — CSS @import (both forms) is rewritten", async (t) => {
+  await t.test("@import \"...\" and @import url(...)", async () => {
+    const files = mapOf({
+      "index.html": `<link rel="stylesheet" href="main.css">`,
+      "main.css": `@import "a.css";\n@import url(b.css);\n@import url("c.css") screen;`,
+      "a.css": `.a{}`,
+      "b.css": `.b{}`,
+      "c.css": `.c{}`,
+    });
+    const preview = await createBlobPreview(files);
+    const css = await textOf(preview.resolve("main.css"));
+    assert.match(css, new RegExp(`@import "${escapeRe(preview.resolve("a.css"))}";`));
+    assert.match(css, new RegExp(`@import url\\(${escapeRe(preview.resolve("b.css"))}\\);`));
+    assert.match(css, new RegExp(`@import url\\("${escapeRe(preview.resolve("c.css"))}"\\) screen;`));
+    preview.dispose();
+  });
+});
+
+await test("createBlobPreview — HTML comments are left untouched", async (t) => {
+  await t.test("a reference-shaped attribute inside a comment is not rewritten", async () => {
+    const files = mapOf({
+      "index.html": `<!-- <a href="./missing-on-purpose.html">nope</a> --><p>real</p>`,
+    });
+    const preview = await createBlobPreview(files);
+    const html = await textOf(preview.entryUrl);
+    assert.match(html, /<!-- <a href="\.\/missing-on-purpose\.html">nope<\/a> -->/);
+    preview.dispose();
+  });
+});
+
+await test("createBlobPreview — missing referenced path", async (t) => {
+  await t.test("leaves a relative reference to a missing file as-is by default (warns, does not throw)", async () => {
+    const files = mapOf({ "index.html": `<a href="./nowhere.html">x</a>` });
+    const preview = await createBlobPreview(files);
+    const html = await textOf(preview.entryUrl);
+    assert.match(html, /href="\.\/nowhere\.html"/);
+    preview.dispose();
+  });
+
+  await t.test("strict: true throws instead", async () => {
+    const files = mapOf({ "index.html": `<a href="./nowhere.html">x</a>` });
+    await assert.rejects(() => createBlobPreview(files, { strict: true }), /nowhere\.html/);
+  });
+
+  await t.test("onUnresolvedReference is called with reason 'missing' instead of the default console.warn", async () => {
+    const files = mapOf({ "index.html": `<a href="./nowhere.html">x</a>` });
+    const calls = [];
+    const preview = await createBlobPreview(files, {
+      onUnresolvedReference: (info) => calls.push(info),
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].reason, "missing");
+    assert.equal(calls[0].targetPath, "nowhere.html");
+    assert.equal(calls[0].fromPath, "index.html");
+    preview.dispose();
+  });
+});
+
+await test("createBlobPreview — reference cycles (including self-reference) degrade to unrewritten, not stale", async (t) => {
+  await t.test("a page linking to itself leaves that one link unrewritten and warns 'cycle'", async () => {
+    const files = mapOf({ "index.html": `<a href="./index.html">self</a>` });
+    const calls = [];
+    const preview = await createBlobPreview(files, {
+      onUnresolvedReference: (info) => calls.push(info),
+    });
+    const html = await textOf(preview.entryUrl);
+    assert.match(html, /href="\.\/index\.html"/); // unrewritten, not a stale blob: URL
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].reason, "cycle");
+    preview.dispose();
+  });
+
+  await t.test("two pages linking to each other: the edge that closes the cycle is left unrewritten, the other is real", async () => {
+    const files = mapOf({
+      "index.html": `<a href="/other.html">other</a>`,
+      "other.html": `<a href="/index.html">home</a>`,
+    });
+    const preview = await createBlobPreview(files, { onUnresolvedReference: () => {} });
+    const indexHtml = await textOf(preview.entryUrl);
+    const otherHtml = await textOf(preview.resolve("other.html"));
+    // index.html -> other.html was the edge that discovered other.html, so it
+    // resolves to a real, live blob URL.
+    assert.match(indexHtml, new RegExp(`href="${escapeRe(preview.resolve("other.html"))}"`));
+    // other.html -> index.html closes the cycle (index.html was still being
+    // finalized) — left as the original relative path.
+    assert.match(otherHtml, /href="\/index\.html"/);
+    preview.dispose();
+  });
+});
+
+await test("createBlobPreview — accepts a LazyFileMap (async get()), same as createRouter", async (t) => {
+  await mkdir(join(TEST_DIR, "assets"), { recursive: true });
+  await writeFile(join(TEST_DIR, "index.html"), `<img src="assets/pic.png"><link rel="stylesheet" href="style.css">`);
+  await writeFile(join(TEST_DIR, "style.css"), `body{}`);
+  await writeFile(join(TEST_DIR, "assets", "pic.png"), Buffer.from([5, 6, 7]));
+
+  await t.test("resolves references the same way an eager Map would", async () => {
+    const lazy = await fromDirectoryLazy(TEST_DIR);
+    const preview = await createBlobPreview(lazy);
+    const html = await textOf(preview.entryUrl);
+    assert.match(html, new RegExp(`src="${escapeRe(preview.resolve("assets/pic.png"))}"`));
+    assert.match(html, new RegExp(`href="${escapeRe(preview.resolve("style.css"))}"`));
+    const picBytes = new Uint8Array(await (await fetch(preview.resolve("assets/pic.png"))).arrayBuffer());
+    assert.deepEqual(picBytes, new Uint8Array([5, 6, 7]));
+    preview.dispose();
+  });
+}).finally(async () => {
+  await rm(TEST_DIR, { recursive: true, force: true });
+});
+
+await test("createBlobPreview — edge cases", async (t) => {
+  await t.test("an empty HTML file produces a valid, empty blob", async () => {
+    const files = mapOf({ "index.html": "" });
+    const preview = await createBlobPreview(files);
+    assert.equal(await textOf(preview.entryUrl), "");
+    preview.dispose();
+  });
+
+  await t.test("an empty CSS file referenced from HTML round-trips to an empty blob", async () => {
+    const files = mapOf({
+      "index.html": `<link rel="stylesheet" href="empty.css">`,
+      "empty.css": "",
+    });
+    const preview = await createBlobPreview(files);
+    assert.equal(await textOf(preview.resolve("empty.css")), "");
+    preview.dispose();
+  });
+
+  await t.test("throws when rootPath is not present in files", async () => {
+    const files = mapOf({ "other.html": "<p>x</p>" });
+    await assert.rejects(() => createBlobPreview(files), /rootPath/);
+  });
+
+  await t.test("a custom rootPath is honored", async () => {
+    const files = mapOf({ "home.html": "<p>custom root</p>" });
+    const preview = await createBlobPreview(files, { rootPath: "home.html" });
+    assert.equal(preview.entryUrl, preview.resolve("home.html"));
+    assert.equal(await textOf(preview.entryUrl), "<p>custom root</p>");
+    preview.dispose();
+  });
+
+  await t.test("resolve() returns null for a path that was never in files", async () => {
+    const files = mapOf({ "index.html": "<p>x</p>" });
+    const preview = await createBlobPreview(files);
+    assert.equal(preview.resolve("nope.txt"), null);
+    preview.dispose();
+  });
+
+  await t.test("every path in files gets exactly one blob URL, even with no HTML/CSS/JS at all", async () => {
+    const files = mapOf({
+      "index.html": "<p>x</p>",
+      "data.json": `{"a":1}`,
+      "font.woff2": new Uint8Array([1, 2]),
+    });
+    const preview = await createBlobPreview(files);
+    assert.match(preview.resolve("data.json"), /^blob:/);
+    assert.match(preview.resolve("font.woff2"), /^blob:/);
+    assert.equal(await textOf(preview.resolve("data.json")), `{"a":1}`);
+    preview.dispose();
+  });
+});
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
