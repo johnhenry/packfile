@@ -24,7 +24,10 @@
     "theres-waldo": "^0.0.0"
   },
   "exports": {
-    ".": "./index.mjs",
+    ".": {
+      "types": "./types.d.ts",
+      "default": "./index.mjs"
+    },
     "./browser": "./browser.mjs",
     "./compat": "./compat.mjs",
     "./cache": "./cache.mjs",
