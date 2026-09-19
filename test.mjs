@@ -6,6 +6,7 @@ import {
   readFile,
   rm,
   readdir,
+  symlink,
 } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -520,5 +521,160 @@ await test("Edge cases", async (t) => {
   });
 }).finally(async () => {
   await rm(TEST_DIR, { recursive: true, force: true }).catch(() => {});
+  await rm(DECOMPILED_DIR, { recursive: true, force: true }).catch(() => {});
+});
+
+// ---------------------------------------------------------------------------
+// Symlink safety in fromDirectory / fromDirectoryLazy
+//
+// A "package up this directory" archiver must not let a symlink inside the
+// target directory read/expose files from outside it, and must not hang or
+// crash on a symlink cycle (e.g. `ln -s . loop`).
+// ---------------------------------------------------------------------------
+const SYMLINK_DIR = "./test_symlink_directory";
+const SYMLINK_OUTSIDE_DIR = "./test_symlink_outside";
+
+await test("Symlink safety", async (t) => {
+  await mkdir(join(SYMLINK_DIR, "sub"), { recursive: true });
+  await mkdir(SYMLINK_OUTSIDE_DIR, { recursive: true });
+  await writeFile(join(SYMLINK_DIR, "normal.txt"), "normal content");
+  await writeFile(join(SYMLINK_DIR, "sub", "real.txt"), "real content");
+  await writeFile(join(SYMLINK_OUTSIDE_DIR, "secret.txt"), "SECRET OUTSIDE FILE");
+
+  // Escaping symlinks: a file symlink and a directory symlink that both
+  // point outside SYMLINK_DIR.
+  await symlink(
+    join("..", "test_symlink_outside", "secret.txt"),
+    join(SYMLINK_DIR, "leak-file.txt")
+  );
+  await symlink(
+    join("..", "test_symlink_outside"),
+    join(SYMLINK_DIR, "leak-dir")
+  );
+
+  // Legitimate internal symlinks: should still resolve normally.
+  await symlink(join("sub", "real.txt"), join(SYMLINK_DIR, "alias.txt"));
+  await symlink("sub", join(SYMLINK_DIR, "sub-alias"));
+
+  // Cyclic symlinks: must not hang/crash the walk.
+  await symlink(".", join(SYMLINK_DIR, "self-loop"));
+
+  await t.test("fromDirectory excludes symlinks that escape the directory", async () => {
+    const map = await fromDirectory(SYMLINK_DIR);
+    assert.ok(!map.has("leak-file.txt"), "file symlink escaping the directory was followed");
+    assert.ok(!map.has("leak-dir/secret.txt"), "directory symlink escaping the directory was followed");
+  });
+
+  await t.test("fromDirectory still follows internal symlinks", async () => {
+    const map = await fromDirectory(SYMLINK_DIR);
+    assert.ok(map.has("alias.txt"));
+    assert.equal(new TextDecoder().decode(map.get("alias.txt").data), "real content");
+    assert.ok(map.has("sub-alias/real.txt"));
+  });
+
+  await t.test("fromDirectory does not hang/crash on a symlink cycle", async () => {
+    const map = await fromDirectory(SYMLINK_DIR);
+    assert.ok(map.has("normal.txt"));
+    // The cycle itself must not be materialized as an infinitely nested path.
+    assert.ok(![...map.keys()].some((k) => k.startsWith("self-loop/")));
+  });
+
+  await t.test("fromDirectoryLazy excludes symlinks that escape the directory", async () => {
+    const lazy = await fromDirectoryLazy(SYMLINK_DIR);
+    assert.ok(!lazy.has("leak-file.txt"));
+    assert.ok(!lazy.has("leak-dir/secret.txt"));
+  });
+
+  await t.test("fromDirectoryLazy still follows internal symlinks", async () => {
+    const lazy = await fromDirectoryLazy(SYMLINK_DIR);
+    assert.ok(lazy.has("alias.txt"));
+    const entry = await lazy.get("alias.txt");
+    assert.equal(new TextDecoder().decode(entry.data), "real content");
+  });
+
+  await t.test("fromDirectoryLazy does not hang/crash on a symlink cycle", async () => {
+    const lazy = await fromDirectoryLazy(SYMLINK_DIR);
+    assert.ok(lazy.has("normal.txt"));
+    assert.ok(![...lazy.keys()].some((k) => k.startsWith("self-loop/")));
+  });
+}).finally(async () => {
+  await rm(SYMLINK_DIR, { recursive: true, force: true }).catch(() => {});
+  await rm(SYMLINK_OUTSIDE_DIR, { recursive: true, force: true }).catch(() => {});
+});
+
+// ---------------------------------------------------------------------------
+// getContentType: own-property lookup safety
+//
+// MIME_TYPES/customMimeTypes are plain object literals. A file whose
+// extension happens to shadow an inherited Object.prototype property (e.g.
+// "constructor", "__proto__") must not leak that inherited value into the
+// Content-Type header.
+// ---------------------------------------------------------------------------
+await test("Content-Type header safety for prototype-shadowing extensions", async (t) => {
+  await mkdir(TEST_DIR, { recursive: true });
+  await writeFile(join(TEST_DIR, "report.constructor"), "data");
+  await writeFile(join(TEST_DIR, "image.__proto__"), "data");
+  await writeFile(join(TEST_DIR, "notes.hasOwnProperty"), "data");
+
+  await t.test("prototype-shadowing extensions fall back to the default type", async () => {
+    const map = await fromDirectory(TEST_DIR);
+    const router = createRouter(map);
+
+    for (const path of ["/report.constructor", "/image.__proto__", "/notes.hasOwnProperty"]) {
+      const res = await router(path);
+      assert.equal(res.status, 200, `${path} should resolve`);
+      const contentType = res.headers.get("Content-Type");
+      assert.equal(
+        contentType,
+        "application/octet-stream",
+        `${path} got unexpected Content-Type: ${contentType}`
+      );
+    }
+  });
+}).finally(async () => {
+  await rm(TEST_DIR, { recursive: true, force: true }).catch(() => {});
+});
+
+// ---------------------------------------------------------------------------
+// fromArchive: isSafePath must reject keys that resolve to "no path at all"
+//
+// decompileDirectory() joins every archive key onto the output directory
+// and writeFile()s the result. A key like "" or "a/.." normalizes to ".",
+// i.e. the output directory itself — writeFile() would then overwrite the
+// freshly-created output directory with a plain file.
+// ---------------------------------------------------------------------------
+await test("fromArchive path validation", async (t) => {
+  await t.test("rejects keys that normalize to the archive root", async () => {
+    const map = new Map();
+    map.set("", { data: new Uint8Array(Buffer.from("evil")), size: 4, hash: "0".repeat(64) });
+    map.set("a/..", { data: new Uint8Array(Buffer.from("evil2")), size: 5, hash: "1".repeat(64) });
+    map.set(".", { data: new Uint8Array(Buffer.from("evil3")), size: 5, hash: "2".repeat(64) });
+    map.set("normal.txt", { data: new Uint8Array(Buffer.from("ok")), size: 2, hash: "3".repeat(64) });
+
+    const buffer = await toArchive(map, { compress: false });
+    const restored = await fromArchive(buffer, { compressed: false });
+
+    assert.ok(!restored.has(""));
+    assert.ok(!restored.has("a/.."));
+    assert.ok(!restored.has("."));
+    assert.ok(restored.has("normal.txt"));
+    assert.equal(restored.size, 1);
+  });
+
+  await t.test("decompileDirectory writes only safe entries and leaves the output directory intact", async () => {
+    const map = new Map();
+    map.set("", { data: new Uint8Array(Buffer.from("evil")), size: 4, hash: "0".repeat(64) });
+    map.set("normal.txt", { data: new Uint8Array(Buffer.from("ok")), size: 2, hash: "3".repeat(64) });
+
+    const buffer = await toArchive(map, { compress: false });
+    await decompileDirectory(buffer, DECOMPILED_DIR, false);
+
+    const stats = await import("node:fs/promises").then((fs) => fs.stat(DECOMPILED_DIR));
+    assert.ok(stats.isDirectory(), "output path must remain a directory, not be overwritten by a file");
+
+    const content = await readFile(join(DECOMPILED_DIR, "normal.txt"), "utf8");
+    assert.equal(content, "ok");
+  });
+}).finally(async () => {
   await rm(DECOMPILED_DIR, { recursive: true, force: true }).catch(() => {});
 });
