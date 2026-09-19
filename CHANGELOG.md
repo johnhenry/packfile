@@ -7,6 +7,10 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+### Added
+
+- **`lemem/blob-preview`** (`lib/blob-preview.mjs`, `createBlobPreview()`): hosts a `FilesMap` inside a browser tab/iframe with no server at all, by minting one `blob:` URL per file and rewriting HTML (`href`/`src`/`srcset`/`poster`/`formaction`) and CSS (`url(...)`/`@import`) references to point at the right blob URL. JS specifier resolution is delegated to the new `@johnhenry/andbox` dependency's `createVirtualModuleRegistry()` rather than reimplemented. This is the lighter-weight of two designs considered ("Approach B") — good enough for trusted/your-own content, not a general solution for arbitrary content; a real Service-Worker-based hosting mode ("Approach A") is deferred and tracked as `andbox#14`. Handles reference cycles (including self-links and mutually-linking pages) by leaving the edge that closes the cycle unrewritten rather than pointing it at a stale blob, since blob content is immutable once minted — see the README's "What this does and does not solve" section for the full breakdown.
+
 ### Fixed
 
 - **The repository was in a broken, half-migrated state**: the last commit before this changeset rewrote `index.mjs`/`package.json`/`readme.md` to point at a new split-file architecture (`lib/from-directory.mjs`, `lib/from-directory-lazy.mjs`, `lib/to-archive.mjs`, `lib/create-router.mjs`, `lib/hash.mjs`, `compat.mjs`) but never committed those files — `npm test` failed immediately with `ERR_MODULE_NOT_FOUND`, and no test could run. Reconstructed the missing implementation from a matching, complete fork.
