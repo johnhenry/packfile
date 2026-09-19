@@ -7,7 +7,7 @@ Static file compiler and server. Compresses directories into CBOR archives and s
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/your-username/lemem.git
+git clone https://github.com/johnhenry/lemem.git
 cd lemem
 npm install
 ```

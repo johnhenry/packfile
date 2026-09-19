@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "type": "module",
   "main": "index.mjs",
+  "types": "./types.d.ts",
   "bin": {
     "lemem": "lemem.mjs"
   },
@@ -15,7 +16,7 @@
   "keywords": [],
   "author": "John Henry <john@iamjohnhenry.com> (https://johnhenry.github.io/)",
   "license": "MIT",
-  "description": "",
+  "description": "Content-addressed static-file archiver and in-memory HTTP router",
   "dependencies": {
     "cbor": "^9.0.2"
   },
@@ -37,6 +38,8 @@
     "cache.mjs",
     "lemem.mjs",
     "lib/",
+    "types.d.ts",
+    "types.ts",
     "README.md",
     "LICENSE"
   ]

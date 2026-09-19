@@ -32,17 +32,16 @@
     <!-- optional -->
     <script src="https://unpkg.com/cbor-web"></script>
     <script type="module">
-      import { createRouter } from "./lib/browser.mjs";
+      import { fromArchive, createRouter } from "./browser.mjs";
       const PATH_TO_FILE = "./demo/compiled.cbor";
       const compiledDirectory = await fetch(PATH_TO_FILE).then((response) =>
         response.arrayBuffer()
       );
-      const router = createRouter(compiledDirectory);
+      const files = await fromArchive(compiledDirectory);
+      const router = createRouter(files, { alias: { "/": "index.html" } });
       const iframe = document.getElementById("content-frame");
       const update = async (path) => {
-        const response = await router(path, {
-          alias: { "/": "index.html" },
-        }); // returns HTTP response object representing the file
+        const response = await router(path); // returns HTTP response object representing the file
         // console.log(await response.text());
         const data =
           "data:" +
