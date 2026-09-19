@@ -186,6 +186,20 @@ import { compressObject, deCompressObject } from 'lemem/compression';
 | `./compression` | `lib/compression.mjs` | `compressObject`, `deCompressObject` |
 | `./compat` | `compat.mjs` | `compileDirectory`, `decompileDirectory` |
 
+## Internal formats
+
+lemem's data passes through several distinct shapes on its way from a
+directory on disk to an HTTP response: the in-memory `FileEntry`/`FilesMap`
+table (eager `Map` or lazy `LazyFileMap`), the gzip+CBOR archive byte
+format, the SHA-256 hash used for both content identity and ETags, two
+separate (Node/browser) gzip implementations, and the `Response` bridge the
+router builds from all of the above. [`FORMATS.md`](./FORMATS.md) documents
+each one precisely -- exact fields/encoding, which function produces it,
+which consumes it, and why it's separate from the others where that's
+evident from the code -- along with a few real inconsistencies found while
+writing it up (e.g. `browser.mjs`'s archive logic having quietly diverged
+from the Node implementation it duplicates).
+
 ## License
 
 This project is licensed under the MIT License.
