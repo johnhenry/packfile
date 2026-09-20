@@ -27,7 +27,7 @@ export {
 };
 
 // Note: `types.d.ts` describes the main `.` entry point (`index.mjs`).
-// `withCache` (from the `lemem/cache` subpath) is documented in the README
+// `withCache` (from the `@johnhenry/packfile/cache` subpath) is documented in the README
 // but not re-declared here, since it is not part of `index.mjs`'s exports.
 
 /** Reads all files from a directory into a `Map<string, FileEntry>`. */

@@ -1,25 +1,24 @@
-# lemem
+# Packfile
+
+> Previously developed as `lemem`, never published under that name. Now
+> `@johnhenry/packfile`, starting at `0.0.0`.
 
 Static file compiler and server. Compresses directories into CBOR archives and serves them as HTTP responses via the `(Request) => Response` handler pattern.
 
 ## Installation
 
-Clone the repository and install dependencies:
-
 ```bash
-git clone https://github.com/johnhenry/lemem.git
-cd lemem
-npm install
+npm install @johnhenry/packfile
 ```
 
 ## Usage
 
-You can use the LEMEM CLI with the following commands:
+You can use the `packfile` CLI with the following commands:
 
 ### Compress a folder
 
 ```bash
-npm run lemem compress <path-to-folder> <path-to-file>
+npx packfile compress <path-to-folder> <path-to-file>
 ```
 
 This command compresses the contents of `<path-to-folder>` and saves the compressed data to `<path-to-file>`.
@@ -27,7 +26,7 @@ This command compresses the contents of `<path-to-folder>` and saves the compres
 ### Decompress a file
 
 ```bash
-npm run lemem decompress <path-to-file> <path-to-folder>
+npx packfile decompress <path-to-file> <path-to-folder>
 ```
 
 This command decompresses the contents of `<path-to-file>` and saves the decompressed files to `<path-to-folder>`.
@@ -35,7 +34,7 @@ This command decompresses the contents of `<path-to-file>` and saves the decompr
 ### Serve a compiled file
 
 ```bash
-npm run lemem serve <path-to-file> [port]
+npx packfile serve <path-to-file> [port]
 ```
 
 This command serves the compiled file at `<path-to-file>` on the specified `[port]` (default is 3000).
@@ -44,17 +43,17 @@ This command serves the compiled file at `<path-to-file>` on the specified `[por
 
 1. Compress a folder:
    ```bash
-   npm run lemem compress ./static ./compiled.cbor
+   npx packfile compress ./static ./compiled.cbor
    ```
 
 2. Decompress a file:
    ```bash
-   npm run lemem decompress ./compiled.cbor ./decompressed
+   npx packfile decompress ./compiled.cbor ./decompressed
    ```
 
 3. Serve a compiled file:
    ```bash
-   npm run lemem serve ./compiled.cbor 8080
+   npx packfile serve ./compiled.cbor 8080
    ```
 
 ## Node.js API
@@ -64,7 +63,7 @@ import {
   fromDirectory, fromDirectoryLazy, fromArchive, toArchive,
   createRouter, hashBuffer, hashStream,
   compileDirectory, decompileDirectory
-} from 'lemem';
+} from '@johnhenry/packfile';
 ```
 
 ### `fromDirectory(path, options?)`
@@ -140,7 +139,7 @@ await decompileDirectory(compiled, './output');
 ## HTTP Caching Middleware
 
 ```js
-import { withCache } from 'lemem/cache';
+import { withCache } from '@johnhenry/packfile/cache';
 ```
 
 Wraps any `(Request) => Response` handler with automatic ETag generation and `304 Not Modified` negotiation:
@@ -157,7 +156,7 @@ Uses SHA-256 hashing (same as file ETags) for consistent cache keys.
 ## Browser Usage
 
 ```js
-import { fromArchive, toArchive, createRouter } from 'lemem/browser';
+import { fromArchive, toArchive, createRouter } from '@johnhenry/packfile/browser';
 ```
 
 The browser bundle provides `fromArchive`, `toArchive`, and `createRouter`. Requires a CBOR library — either pass `options.decode`/`options.encode` or load one globally as `globalThis.cbor`.
@@ -171,11 +170,11 @@ const router = createRouter(files);
 ## Blob Preview (host packaged content in a browser tab/iframe, no server)
 
 ```js
-import { createBlobPreview } from 'lemem/blob-preview';
+import { createBlobPreview } from '@johnhenry/packfile/blob-preview';
 ```
 
 `createRouter()` needs something to call it — a real server, a Service
-Worker, or (in `lemem/browser`) at least a `fetch`-shaped handler wired up
+Worker, or (in `@johnhenry/packfile/browser`) at least a `fetch`-shaped handler wired up
 to something. `createBlobPreview()` is for the case where you don't want
 any of that: you have a `FilesMap` (from `fromDirectory()`/`fromArchive()`,
 same input `createRouter()` takes) and you just want to point an
@@ -189,8 +188,8 @@ files) is delegated to the sibling `@johnhenry/andbox` package's
 `createVirtualModuleRegistry()` rather than reimplemented here.
 
 ```js
-import { fromDirectory } from 'lemem';
-import { createBlobPreview } from 'lemem/blob-preview';
+import { fromDirectory } from '@johnhenry/packfile';
+import { createBlobPreview } from '@johnhenry/packfile/blob-preview';
 
 const files = await fromDirectory('./static');
 const preview = await createBlobPreview(files, { rootPath: 'index.html' });
@@ -226,7 +225,7 @@ function createBlobPreview(
 ### What this does and does not solve
 
 This is the lighter-weight of two designs considered for hosting
-lemem-packaged content client-side. It is **good enough for trusted, your
+packfile-packaged content client-side. It is **good enough for trusted, your
 own content** — not a general solution for arbitrary/untrusted content,
 and it does not attempt to solve everything a real HTTP origin gives you
 for free:
@@ -263,13 +262,13 @@ for free:
   throws `Invalid URL`), so a raw multi-file ESM graph loaded this way
   won't resolve its own imports in a real browser. `registry.resolveSpecifier()`
   is exposed for callers who want to do their own resolution; otherwise,
-  pre-bundle multi-file JS into one file before packaging with lemem.
+  pre-bundle multi-file JS into one file before packaging with packfile.
 
 ## Direct Imports
 
 ```js
-import { hashBuffer, hashStream } from 'lemem/hash';
-import { compressObject, deCompressObject } from 'lemem/compression';
+import { hashBuffer, hashStream } from '@johnhenry/packfile/hash';
+import { compressObject, deCompressObject } from '@johnhenry/packfile/compression';
 ```
 
 ## Exports
@@ -286,7 +285,7 @@ import { compressObject, deCompressObject } from 'lemem/compression';
 
 ## Internal formats
 
-lemem's data passes through several distinct shapes on its way from a
+packfile's data passes through several distinct shapes on its way from a
 directory on disk to an HTTP response: the in-memory `FileEntry`/`FilesMap`
 table (eager `Map` or lazy `LazyFileMap`), the gzip+CBOR archive byte
 format, the SHA-256 hash used for both content identity and ETags, two

@@ -1,9 +1,9 @@
 /**
  * HTTP caching middleware for leserve handlers.
- * Leverages lemem's SHA-256 hashing for automatic ETag generation.
+ * Leverages packfile's SHA-256 hashing for automatic ETag generation.
  *
  * Usage:
- *   import { withCache } from "lemem/cache";
+ *   import { withCache } from "@johnhenry/packfile/cache";
  *
  *   const handler = withCache(myHandler);
  *   // Responses now include ETag, Cache-Control, and 304 negotiation.

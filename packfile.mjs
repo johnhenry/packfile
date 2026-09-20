@@ -20,7 +20,7 @@ try {
   switch (command) {
     case "compress": {
       if (args.length < 2 || args.length > 3) {
-        throw new Error("Usage: lemem compress <path-to-folder> <path-to-file> [compression-level]");
+        throw new Error("Usage: packfile compress <path-to-folder> <path-to-file> [compression-level]");
       }
       let compressionLevel;
       if (args[2] !== undefined) {
@@ -38,7 +38,7 @@ try {
     }
     case "decompress": {
       if (args.length !== 2) {
-        throw new Error("Usage: lemem decompress <path-to-file> <path-to-folder>");
+        throw new Error("Usage: packfile decompress <path-to-file> <path-to-folder>");
       }
       log("info", `Starting decompression of file ${args[0]}`);
       const data = await readFile(args[0]);
@@ -48,7 +48,7 @@ try {
     }
     case "serve": {
       if (args.length < 1 || args.length > 2) {
-        throw new Error("Usage: lemem serve <path-to-file> [port]");
+        throw new Error("Usage: packfile serve <path-to-file> [port]");
       }
       const port = args[1] ? parseInt(args[1]) : 3000;
       log("info", `Starting server for file ${args[0]} on port ${port}`);

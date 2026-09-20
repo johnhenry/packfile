@@ -1,6 +1,6 @@
 # Internal formats
 
-lemem moves the same file content through several different shapes depending
+packfile moves the same file content through several different shapes depending
 on where it is in the pipeline: a directory on disk, an in-memory lookup
 table, a single portable binary artifact, and a `Response`. None of these
 are documented together anywhere else, so this file exists to make the set
@@ -141,7 +141,7 @@ the browser entry point gets no error and no effect.
 **Why the archive format is separate from the in-memory `Map`:** the README
 frames this directly -- the archive is "a compressed CBOR buffer," i.e. a
 single portable binary artifact meant to be written to one file
-(`lemem compress`), fetched over HTTP as one request (`fromArchive(await
+(`packfile compress`), fetched over HTTP as one request (`fromArchive(await
 fetch(...).then(r => r.arrayBuffer()))`), or embedded in a build output.
 The in-memory `Map`/`LazyFileMap` exists for O(1) path lookup during
 routing; the archive exists for "one blob, portable, on disk or over the
@@ -181,7 +181,7 @@ codebase.
   anywhere as a dedicated cache-key/dedup mechanism -- the hash is present
   per-entry but nothing in `lib/` compares hashes across two `Map`s or
   archives to decide "did this file change." (`fileable`'s sibling package
-  does this kind of hash-based incremental build; lemem does not appear to,
+  does this kind of hash-based incremental build; packfile does not appear to,
   based on what's actually in this codebase.)
 - **HTTP caching**: `lib/response.mjs`'s `buildFileResponse()` uses
   `entry.hash` directly as a strong `ETag` (`"${entry.hash}"`) and handles
@@ -190,7 +190,7 @@ codebase.
   independent path: it doesn't use any `FileEntry.hash` at all. It reads
   the already-built `Response`'s body (`response.arrayBuffer()`) and calls
   `hashBuffer()` on that directly, computing a fresh SHA-256 over the
-  served bytes every time, for handlers that aren't backed by a lemem
+  served bytes every time, for handlers that aren't backed by a packfile
   `FilesMap` at all (its own doc comment says it's meant for arbitrary
   "leserve handlers"). This is the same hash *algorithm* as §"produced by"
   above (SHA-256 hex), reused for the same purpose (ETags), but computed at
@@ -249,7 +249,7 @@ confirmed, CHANGELOG-documented security fix, not speculative.
 
 ## 6. The `Response` bridge (`lib/response.mjs`)
 
-**What it is:** the point where a `FileEntry` (§1) stops being lemem's
+**What it is:** the point where a `FileEntry` (§1) stops being packfile's
 internal shape and becomes a standard Web/Fetch API `Response` object.
 `buildFileResponse(request, filePath, entry, opts)` builds headers
 (`Content-Type` via §5, `Content-Length: String(entry.size)`,
@@ -333,12 +333,12 @@ preserved end-to-end), not a gap this document is proposing to fix.
 | # | Format | Produced by | Consumed by |
 |---|--------|-------------|-------------|
 | 1 | `FileEntry` / `FilesMap` (eager `Map` or `LazyFileMap`) | `fromDirectory`, `fromDirectoryLazy`, `fromArchive` (both impls) | `toArchive`, `createRouter`, `decompileDirectory` |
-| 2 | Archive bytes: `gzip(cbor({path: FileEntry}))` | `toArchive` (`lib/to-archive.mjs`, `browser.mjs`) | `fromArchive` (`lib/from-archive.mjs`, `browser.mjs`), `lemem.mjs` CLI |
+| 2 | Archive bytes: `gzip(cbor({path: FileEntry}))` | `toArchive` (`lib/to-archive.mjs`, `browser.mjs`) | `fromArchive` (`lib/from-archive.mjs`, `browser.mjs`), `packfile.mjs` CLI |
 | 3 | Hash: SHA-256 hex string | `hashBuffer`/`hashStream` (`lib/hash.mjs`), inlined into `fromDirectory`/`LazyFileMap` | `lib/response.mjs` (ETag), `cache.mjs` (`withCache`, independently) |
 | 4 | Compression: gzip (Node `zlib` / Web `CompressionStream`) | `lib/compression.mjs`, `lib/compression.browser.mjs` | `toArchive`/`fromArchive` and their `browser.mjs` counterparts |
 | 5 | MIME lookup table | `lib/mime.mjs` | `lib/response.mjs` |
 | 6 | `Response` bridge | `lib/response.mjs` | `lib/create-router.mjs` |
-| 7 | Router request-matching (alias → strip `/` → extension fallback) | `lib/create-router.mjs` | `lemem.mjs` CLI `serve`, any caller of `createRouter()` |
+| 7 | Router request-matching (alias → strip `/` → extension fallback) | `lib/create-router.mjs` | `packfile.mjs` CLI `serve`, any caller of `createRouter()` |
 
 ## Loose ends found while writing this document
 
