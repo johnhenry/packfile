@@ -29,7 +29,7 @@
     "demo:browser": "npx serve ."
   },
   "keywords": [],
-  "author": "John Henry <john@iamjohnhenry.com> (https://johnhenry.github.io/)",
+  "author": "John Henry",
   "license": "MIT",
   "description": "Content-addressed static-file archiver and in-memory HTTP router",
   "dependencies": {
