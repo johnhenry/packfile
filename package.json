@@ -34,10 +34,11 @@
   "description": "Content-addressed static-file archiver and in-memory HTTP router",
   "dependencies": {
     "@johnhenry/andbox": "^0.0.2",
-    "cbor": "^9.0.2"
+    "wbn": "^0.0.9"
   },
   "devDependencies": {
-    "theres-waldo": "^0.0.0"
+    "theres-waldo": "^0.0.0",
+    "wbn-sign": "^0.3.1"
   },
   "exports": {
     ".": {
@@ -49,7 +50,8 @@
     "./cache": "./cache.mjs",
     "./hash": "./lib/hash.mjs",
     "./compression": "./lib/compression.mjs",
-    "./blob-preview": "./lib/blob-preview.mjs"
+    "./blob-preview": "./lib/blob-preview.mjs",
+    "./web-bundle": "./lib/web-bundle.mjs"
   },
   "files": [
     "index.mjs",

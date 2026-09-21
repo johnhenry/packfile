@@ -3,7 +3,11 @@
 > Previously developed as `lemem`, never published under that name. Now
 > `@johnhenry/packfile`, starting at `0.0.0`.
 
-Static file compiler and server. Compresses directories into CBOR archives and serves them as HTTP responses via the `(Request) => Response` handler pattern.
+Static file compiler and server. Compresses directories into archives --
+gzip(`application/webbundle`), the format Chrome's Isolated Web Apps are
+built on, via the real [`wbn`](https://github.com/WICG/webpackage/tree/main/js/bundle)
+package -- and serves them as HTTP responses via the `(Request) => Response`
+handler pattern.
 
 ## Installation
 
@@ -43,17 +47,17 @@ This command serves the compiled file at `<path-to-file>` on the specified `[por
 
 1. Compress a folder:
    ```bash
-   npx packfile compress ./static ./compiled.cbor
+   npx packfile compress ./static ./compiled.wbn
    ```
 
 2. Decompress a file:
    ```bash
-   npx packfile decompress ./compiled.cbor ./decompressed
+   npx packfile decompress ./compiled.wbn ./decompressed
    ```
 
 3. Serve a compiled file:
    ```bash
-   npx packfile serve ./compiled.cbor 8080
+   npx packfile serve ./compiled.wbn 8080
    ```
 
 ## Node.js API
@@ -85,7 +89,7 @@ const entry = await files.get('index.html'); // reads from disk
 
 ### `toArchive(map, options?)`
 
-Serializes a file Map to a compressed CBOR buffer.
+Serializes a file Map to a compressed archive buffer -- `gzip(application/webbundle)`, via the real `wbn` package.
 
 ```js
 const buffer = await toArchive(files);
@@ -93,7 +97,7 @@ const buffer = await toArchive(files);
 
 ### `fromArchive(buffer, options?)`
 
-Deserializes a CBOR archive back to a file Map. Validates paths — entries with path traversal (`../`) or absolute paths are rejected.
+Deserializes an archive back to a file Map. Validates paths — entries with path traversal (`../`) or absolute paths are rejected.
 
 ```js
 const files = await fromArchive(buffer);
@@ -159,10 +163,10 @@ Uses SHA-256 hashing (same as file ETags) for consistent cache keys.
 import { fromArchive, toArchive, createRouter } from '@johnhenry/packfile/browser';
 ```
 
-The browser bundle provides `fromArchive`, `toArchive`, and `createRouter`. Requires a CBOR library — either pass `options.decode`/`options.encode` or load one globally as `globalThis.cbor`.
+The browser bundle provides `fromArchive`, `toArchive`, and `createRouter`, using the `wbn` package directly (no Node APIs required) and Web Crypto for hashing -- same wire format as the Node entrypoint, so an archive built by one is directly readable by the other.
 
 ```js
-const archive = await fetch('/app.cbor').then(r => r.arrayBuffer());
+const archive = await fetch('/app.wbn').then(r => r.arrayBuffer());
 const files = await fromArchive(archive);
 const router = createRouter(files);
 ```
@@ -264,6 +268,89 @@ for free:
   is exposed for callers who want to do their own resolution; otherwise,
   pre-bundle multi-file JS into one file before packaging with packfile.
 
+## Web Bundle / Isolated Web App primitives (`./web-bundle`)
+
+`toArchive()`/`fromArchive()` at the main `.` entrypoint (and `createRouter()`)
+already use `application/webbundle` under the hood -- see "Node.js API"
+above. This subpath is for callers who want the lower-level control those
+two deliberately hide: a real, resolvable `baseURL` (rather than the fixed
+internal one `toArchive`/`fromArchive` use), custom per-file `headers()`,
+signing via `wbn-sign` for actual Isolated Web App deployment, and a router
+that serves a bundle's own real headers verbatim.
+
+```js
+import { toWebBundle, fromWebBundle } from '@johnhenry/packfile/web-bundle';
+import { fromDirectory } from '@johnhenry/packfile';
+
+const files = await fromDirectory('./static');
+const bundle = toWebBundle(files, { baseURL: 'https://example.com/' });
+// bundle is a Uint8Array, directly loadable/parseable by `wbn`'s own
+// Bundle class, or `<script type=webbundle>` in a supporting browser.
+
+const recovered = fromWebBundle(bundle, { baseURL: 'https://example.com/' });
+// back to a FilesMap, e.g. to hand to a different consumer.
+```
+
+**Serving a bundle**: `createRouter(fromWebBundle(bundle, { baseURL }))`
+already works today, no new code needed -- `fromWebBundle()`'s return value
+is a real `FilesMap`. But that path only keeps `data`/`size`/`hash`, so
+`createRouter()` resynthesizes Content-Type/Cache-Control/ETag from
+scratch rather than serving whatever headers were actually baked into the
+bundle. `createWebBundleRouter(bundle, options)` serves a parsed
+`wbn.Bundle` directly instead -- same `(input, ctx?) => Promise<Response>`
+router contract (`alias`, `tryExtensions`, `fallback`, a real `Request` or a
+bare path string, `.fetch`), but every response's actual status/headers are
+served verbatim:
+
+```js
+import * as wbn from 'wbn';
+import { toWebBundle, createWebBundleRouter } from '@johnhenry/packfile/web-bundle';
+
+const bytes = toWebBundle(files, {
+  baseURL: 'https://example.com/',
+  headers: () => ({ 'Cache-Control': 'max-age=600, immutable' }),
+});
+const bundle = new wbn.Bundle(bytes); // parse once, reuse across requests --
+                                       // wbn decodes the WHOLE bundle eagerly
+                                       // in the constructor, there's no lazy/
+                                       // streaming read path like
+                                       // fromDirectoryLazy()'s LazyFileMap.
+const router = createWebBundleRouter(bundle, { baseURL: 'https://example.com/' });
+const response = await router('index.html'); // Cache-Control is the real, baked-in header
+```
+
+**Why this exists**: packfile was originally built with `wbn` in mind, then
+moved to a bespoke gzip+CBOR format when `wbn`/Web Bundles looked
+effectively abandoned. IWA gave the format new, active life, and the
+archive format was migrated wholesale onto it -- `lib/to-archive.mjs`/
+`lib/from-archive.mjs` are now thin wrappers around `toWebBundle()`/
+`fromWebBundle()` below, with a fixed internal `baseURL`. See FORMATS.md
+§2 for the full migration writeup (what changed, what it fixed as a side
+effect, what's still platform-specific between Node and the browser build).
+
+**What this subpath adds beyond `toArchive`/`fromArchive`**: a Web Bundle
+models full HTTP *exchanges* (absolute URL + status + headers + body), not
+just a flat path -> bytes map -- `FileEntry` carries none of that, so
+`toWebBundle()` synthesizes it (`Content-Type` inferred by extension, same
+as `createRouter()`'s own responses; status always `200`) unless a real
+`baseURL`/`headers()` is supplied, which `toArchive()` doesn't expose at
+all. `fromWebBundle()` recomputes `hash` via `hashBuffer()` on the way
+back, since Web Bundles don't carry a content hash of their own.
+
+**Verified against real interop, not just internal round-tripping**:
+`test.mjs`'s "toWebBundle / fromWebBundle" section cross-checks
+`toWebBundle()`'s output against `wbn`'s own `Bundle` parser directly, and
+signs a real bundle with `wbn-sign`'s `SignedWebBundle` using a real
+generated Ed25519 key pair -- the actual packages Chrome/IWA tooling
+itself uses.
+
+**Still open, for actual IWA deployment (not for the archive-format use
+this subpath already covers)**: how to choose/compute a `baseURL` when
+targeting `isolated-app://<web-bundle-id>/` specifically -- that origin is
+derived from the signing key itself via `wbn-sign`'s `WebBundleId`, not
+chosen freely, so a real IWA build needs to sign first and set `baseURL`
+from the result, a different order than the examples above.
+
 ## Direct Imports
 
 ```js
@@ -282,12 +369,13 @@ import { compressObject, deCompressObject } from '@johnhenry/packfile/compressio
 | `./compression` | `lib/compression.mjs` | `compressObject`, `deCompressObject` |
 | `./compat` | `compat.mjs` | `compileDirectory`, `decompileDirectory` |
 | `./blob-preview` | `lib/blob-preview.mjs` | `createBlobPreview` — host a `FilesMap` client-side via `blob:` URLs, no server |
+| `./web-bundle` | `lib/web-bundle.mjs` | Lower-level Web Bundle primitives: `toWebBundle`, `fromWebBundle`, `createWebBundleRouter` — the engine `toArchive`/`fromArchive` are built on, with a real `baseURL`/headers/IWA-signing exposed |
 
 ## Internal formats
 
 packfile's data passes through several distinct shapes on its way from a
 directory on disk to an HTTP response: the in-memory `FileEntry`/`FilesMap`
-table (eager `Map` or lazy `LazyFileMap`), the gzip+CBOR archive byte
+table (eager `Map` or lazy `LazyFileMap`), the gzip(Web Bundle) archive byte
 format, the SHA-256 hash used for both content identity and ETags, two
 separate (Node/browser) gzip implementations, and the `Response` bridge the
 router builds from all of the above. [`FORMATS.md`](./FORMATS.md) documents

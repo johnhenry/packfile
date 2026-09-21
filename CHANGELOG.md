@@ -15,9 +15,70 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
   The CLI binary `lemem` (`lemem.mjs`) is renamed to `packfile`
   (`packfile.mjs`) to match. `engines.node` set to `>=26.0.0`, matching
   the rest of the `@johnhenry/*` family's floor.
+- **The archive format moved wholesale from a bespoke `gzip(cbor(flat
+  object))` to `gzip(application/webbundle)`, via the real, Google-maintained
+  `wbn` package -- the `cbor` dependency is gone entirely.** Not an
+  incremental change or an opt-in `formatVersion`: this package was
+  originally built with `wbn`/Web Bundles in mind, then moved to the
+  bespoke CBOR format when Web Bundles looked effectively abandoned; IWA
+  (Isolated Web Apps) gave the format renewed, active life, which removed
+  the reason for the bespoke format to exist at all. `toArchive()`/
+  `fromArchive()` (and `compileDirectory()`/`decompileDirectory()`,
+  `createRouter()`, the CLI's `compress`/`decompress`/`serve` commands) keep
+  their exact existing signatures -- this is invisible at the API level --
+  but an archive written by a previous version of this package is **not**
+  readable by this one, and vice versa; there was no external consumer to
+  preserve compatibility for (0.0.0, never published). Two real correctness
+  properties came along as a side effect of the migration, not as separate
+  deliberate fixes: (1) `FileEntry.hash` on the archive-read path is now
+  always *recomputed* from the actual response body (a Web Bundle exchange
+  has no hash field to misplace trust in, unlike the old format's `hash:
+  value.hash`, read straight from the decoded object and never verified
+  against `data`); (2) `browser.mjs`'s independent CBOR
+  encode/decode/path-safety implementation (previously a real, documented
+  divergence risk from the Node side -- see FORMATS.md) now uses the same
+  `wbn` package and the same `isSafePath()` algorithm as the Node side, so
+  an archive built in one environment is directly readable in the other --
+  verified for real, both directions (`test.mjs`, "browser.mjs
+  toArchive/fromArchive"). See FORMATS.md §2 for the full writeup, including
+  what's still deliberately platform-specific (hashing: Node's synchronous
+  `crypto.createHash` vs. Web Crypto's async `crypto.subtle.digest`;
+  compression: Node `zlib` vs. `CompressionStream`) and what wasn't touched
+  (`browser.mjs`'s `toArchive` still silently drops `compressionLevel` --
+  `CompressionStream` has no level parameter to plumb one through to).
+  `@johnhenry/packfile/web-bundle` (`lib/web-bundle.mjs`) -- previously
+  experimental -- is the engine underneath this migration; it's also still
+  directly reachable for callers who want the lower-level control
+  `toArchive`/`fromArchive` deliberately hide (a real `baseURL`, custom
+  `headers()`, IWA signing via `wbn-sign`, and `createWebBundleRouter()` for
+  serving a bundle's own real headers verbatim instead of `createRouter()`'s
+  synthesized ones -- all unchanged from when they were added, see below).
 
 ### Added
 
+- **`@johnhenry/packfile/web-bundle`** (`lib/web-bundle.mjs`):
+  `toWebBundle()`/`fromWebBundle()` convert between this package's own
+  `FilesMap` and the `application/webbundle` format Chrome's Isolated Web
+  Apps are built on, via the real `wbn`/`wbn-sign` npm packages (no format
+  reimplementation) -- now also the engine `toArchive()`/`fromArchive()`
+  are built on (see "Changed (breaking)" above). Verified against real
+  interop, not just self-consistency: `toWebBundle()`'s output is
+  cross-checked against `wbn`'s own `Bundle` parser directly, and signed
+  with `wbn-sign`'s real `SignedWebBundle` using a real generated Ed25519
+  key pair (`test.mjs`, "toWebBundle / fromWebBundle"). Also adds
+  `createWebBundleRouter(bundle, options)`: serves a parsed `wbn.Bundle`
+  directly, same router contract as `createRouter()` (`alias`,
+  `tryExtensions`, `fallback`, `.fetch`), but returns each exchange's own
+  baked-in status/headers verbatim instead of resynthesizing
+  Content-Type/Cache-Control/ETag the way `createRouter()` does for a
+  `FileEntry` -- `createRouter(fromWebBundle(...))` already works too (no
+  new code needed, since `fromWebBundle()` returns a real `FilesMap`), but
+  that path discards whatever headers were actually baked into the bundle.
+  `new wbn.Bundle(buffer)` decodes the entire bundle eagerly in its
+  constructor (confirmed by reading `wbn`'s own decoder) -- unlike
+  `fromDirectoryLazy()`'s `LazyFileMap`, there's no lazy/streaming read path
+  in `wbn` itself, so this is a "parse once, reuse the instance" story, not
+  an on-demand one.
 - **`lemem/blob-preview`** (`lib/blob-preview.mjs`, `createBlobPreview()`): hosts a `FilesMap` inside a browser tab/iframe with no server at all, by minting one `blob:` URL per file and rewriting HTML (`href`/`src`/`srcset`/`poster`/`formaction`) and CSS (`url(...)`/`@import`) references to point at the right blob URL. JS specifier resolution is delegated to the new `@johnhenry/andbox` dependency's `createVirtualModuleRegistry()` rather than reimplemented. This is the lighter-weight of two designs considered ("Approach B") — good enough for trusted/your-own content, not a general solution for arbitrary content; a real Service-Worker-based hosting mode ("Approach A") is deferred and tracked as `andbox#14`. Handles reference cycles (including self-links and mutually-linking pages) by leaving the edge that closes the cycle unrewritten rather than pointing it at a stale blob, since blob content is immutable once minted — see the README's "What this does and does not solve" section for the full breakdown.
 
 ### Fixed

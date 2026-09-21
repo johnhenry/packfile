@@ -65,116 +65,146 @@ cannot be archived directly without first materializing it into a `Map`),
 `createRouter()` (reads via `has()`/`get()` at request time), and
 `compat.mjs`'s `decompileDirectory()` (writes each entry's `data` to disk).
 
-## 2. The archive format: gzip(CBOR(object))
+## 2. The archive format: gzip(Web Bundle)
 
-**What it is, precisely:** a CBOR-encoded plain JavaScript object (not a
-CBOR "map" type keyed by the `Map` class -- `toArchive` explicitly converts
-`Map` to `{}` first, since CBOR encoders work over enumerable object
-properties), optionally gzip-compressed on top. Each property is a path key
-whose value is `{ data: Uint8Array, size: number, hash: string }` --
-`FileEntry` decoded/re-encoded as-is, not a separate archive-specific
-schema.
+**Changed wholesale, not incrementally.** Through 0.0.0's early history this
+was a bespoke `gzip(cbor(flatObject))` format (a CBOR-encoded plain object,
+one property per path). That format is gone -- not kept as a fallback or a
+`formatVersion` option -- replaced by `gzip(`[`application/webbundle`](https://developer.chrome.com/docs/iwa/introduction)`)`,
+the format Chrome's Isolated Web Apps are built on, via the real,
+Google-maintained `wbn` npm package. There was no external consumer of the
+old byte format to preserve compatibility for (0.0.0, never published), so
+this is a clean break: an archive written by a previous version of this
+package is not readable by this one.
 
-There is **no magic number, version byte, or framing of any kind**. The
-byte stream is exactly `gzip(cbor(obj))` (or bare `cbor(obj)` if
-`compress: false`). The two ends of a round trip must agree out-of-band on
-whether the buffer is compressed -- both `toArchive`/`fromArchive` and their
-`browser.mjs` counterparts default `compressed`/`compress` to `true`, so as
-long as both sides use the default, or both sides pass the same explicit
-option, it round-trips. Nothing in the buffer itself records which mode
-was used to write it, so a caller that has already lost track of the
-option (e.g. loaded an old `.cbor` file whose compression setting isn't
-recorded anywhere else) has no way to detect it from the file itself. This
-is a real gap, not something the code works around.
+**Why**: this package was originally built with `wbn`/Web Bundles in mind;
+the bespoke CBOR format was adopted only because Web Bundles looked
+effectively abandoned at the time. IWA gave the format renewed, active
+life, which removed the reason for the bespoke format to exist. A Web
+Bundle also models something the flat CBOR object never could -- real HTTP
+*exchanges* (status + headers per entry, not just bytes) -- which
+`lib/web-bundle.mjs`'s `createWebBundleRouter()` (§7) now serves directly.
 
-**Produced by:** `lib/to-archive.mjs`'s `toArchive(map, opts)`. Uses the
-`cbor` npm package's `cbor.encodeAsync()` -- specifically *not*
-`cbor.encode()`/`encodeOne()`, per a detailed comment in the source: those
-synchronous-looking APIs were observed (on Node 26) to resolve their
-promise before the internal encoding stream finished flushing, silently
-truncating output to just the 1-byte CBOR map header. This is confirmed by
-the CHANGELOG as a real bug that was hit and fixed, not a hypothetical.
-Compression (gzip via `lib/compression.mjs`) is applied after encoding,
-default on.
+**What it is, precisely:** a Web Bundle is itself CBOR underneath (a
+specific, spec'd array-of-sections structure with real framing -- see
+below), gzip-compressed on top by this package, same as before. Each
+exchange's URL is a path resolved against a fixed, internal-only
+`ARCHIVE_BASE_URL` (`"https://packfile.invalid/"`, the IANA/RFC 2606
+`.invalid` TLD -- guaranteed never a real, resolvable origin, since this
+URL is only ever built and immediately stripped back off, never
+dereferenced), status is always `200`, and `Content-Type` is inferred from
+the path extension via `lib/mime.mjs`'s `getContentType()` -- the same
+table `createRouter()`'s own synthesized responses already use. `size`/
+`hash` are **not** stored in the bundle at all (a Web Bundle has no such
+concept); both are simple derived properties of the body bytes, recomputed
+on read (`size` from `body.byteLength`, `hash` via `hashBuffer()`) rather
+than round-tripped as separate fields.
 
-**Consumed by:** `lib/from-archive.mjs`'s `fromArchive(buffer, opts)`.
-Decompresses (if `compressed: true`, the default) via
-`lib/compression.mjs`'s `deCompressObject` (Node `zlib.gunzip`), decodes
-via `cbor.decode()` (synchronous form -- only the encode side has the
-async-flush bug per the comment), then re-`Map`-ifies the object. Every key
-is run through `isSafePath()` first (rejects absolute paths, `..`-escaping
-paths after `path.normalize()`, embedded NUL bytes, and paths that
-normalize down to "the output directory itself" e.g. `""`, `"."`, `"a/.."`)
-and unsafe entries are **silently dropped** rather than throwing. This
-exists specifically to stop `decompileDirectory()` (which joins each key
-onto an output directory and writes it) from writing outside that
-directory or clobbering it -- see the CHANGELOG's "Archive path-validation
-gap" entry.
+Unlike the old format, this one genuinely **does** have magic bytes,
+version, and framing -- `wbn`'s own decoder checks for a literal `🌐📦`
+magic value and an approved version string before parsing anything else
+(`node_modules/wbn/lib/decoder.js`) -- but that's `wbn`'s format
+guarantee, not something this package added on top. The *gzip* wrapping
+this package applies around it still has no framing of its own: the two
+ends of a round trip must still agree out-of-band on whether the buffer is
+gzip-compressed (`toArchive`/`fromArchive`'s `compress`/`compressed`
+options, both default `true`) -- that part of the original gap is
+unchanged.
 
-**A second, independent implementation exists in `browser.mjs`.**
-`browser.mjs` does not import `lib/to-archive.mjs` / `lib/from-archive.mjs`
--- it reimplements the same object-shape logic inline, using an
-injected/global CBOR encoder/decoder (`options.encode`/`options.decode`, or
-`globalThis.cbor`) instead of the `cbor` npm package, and
-`lib/compression.browser.mjs` instead of `lib/compression.mjs`. The
-underlying reason (Node's `cbor` package and `node:zlib` aren't usable in a
-browser) is evident from the code; the fact that it's a **separately
-maintained copy of the same encode/decode logic**, rather than a shared
-helper the two entry points both call, is not explained anywhere and is a
-real duplication risk. Concretely, the two `isSafePath()`s have already
-diverged: `browser.mjs`'s version is a simpler substring/prefix check
-(rejects any path containing `..` anywhere, or starting with `/`/`\`, or
-containing NUL) and does **not** apply `path.normalize()` first or reject
-the "resolves to the output directory itself" case the way
-`lib/from-archive.mjs`'s does. Both are defensible on their own, but they
-are not the same algorithm, and a fix made to one (like the path-validation
-fix recorded in the CHANGELOG) is not guaranteed to have been ported to the
-other -- confirmed by inspection, not assumed.
+**Produced by:** `lib/to-archive.mjs`'s `toArchive(map, opts)`, a thin
+wrapper around `lib/web-bundle.mjs`'s `toWebBundle()` with the fixed
+`ARCHIVE_BASE_URL`. Compression (gzip via `lib/compression.mjs`) is applied
+after building the bundle, default on, unchanged from before.
 
-`browser.mjs`'s `toArchive` also silently drops `ToArchiveOptions
-.compressionLevel` -- it destructures only `{ compressed, encode }` from
-`opts` and never passes a level through to `compressObject()` (whose
-browser implementation, `lib/compression.browser.mjs`, has no level
-parameter at all -- see below). A caller passing `compressionLevel` through
-the browser entry point gets no error and no effect.
+**Consumed by:** `lib/from-archive.mjs`'s `fromArchive(buffer, opts)`, a
+thin wrapper around `fromWebBundle()`. Decompresses (if `compressed: true`,
+the default) via `lib/compression.mjs`'s `deCompressObject`, then parses
+via `wbn.Bundle` and strips `ARCHIVE_BASE_URL` back off each exchange's
+URL to recover the relative path. Every resulting path is still run through
+an `isSafePath()` check (now living inside `fromWebBundle()` itself, applied
+whenever a `baseURL` is given) -- rejects a leading `/`/`\`, any `..`
+substring, an embedded NUL byte, or the empty/`"."` path -- and unsafe
+entries are **silently dropped** rather than throwing, same behavior as
+before (see the CHANGELOG's "Archive path-validation gap" entry for why).
 
-**Why the archive format is separate from the in-memory `Map`:** the README
-frames this directly -- the archive is "a compressed CBOR buffer," i.e. a
-single portable binary artifact meant to be written to one file
-(`packfile compress`), fetched over HTTP as one request (`fromArchive(await
-fetch(...).then(r => r.arrayBuffer()))`), or embedded in a build output.
-The in-memory `Map`/`LazyFileMap` exists for O(1) path lookup during
-routing; the archive exists for "one blob, portable, on disk or over the
-wire." They are different formats for a genuine "at rest / single file" vs
-"in memory / keyed lookup" split.
+**The hash-trust gap that existed here is now closed as a side effect, not
+a deliberate fix.** The old format's `fromArchive()` read `hash` straight
+out of the decoded object and trusted it as-is, never re-verified against
+`data` -- documented above (pre-migration) as a real, found gap. The new
+format has nowhere to put an untrusted hash even if it wanted to (Web
+Bundles have no hash field), so `fromWebBundle()`'s `hashBuffer()` call is
+now the *only* source of `FileEntry.hash` on the read path -- it is
+structurally impossible for the returned hash to disagree with the actual
+bytes sitting next to it in the same entry, the same guarantee the *write*
+path (`fromDirectory`) already had.
+
+**`browser.mjs`'s independent implementation is now format-convergent, still
+code-divergent, for a real platform reason.** `browser.mjs` previously
+reimplemented the same object-shape CBOR logic inline against an
+injected/global CBOR encoder/decoder, a documented, real divergence risk
+(the two `isSafePath()`s had already drifted apart -- see below). It now
+imports `wbn` directly, the same package the Node side uses (`wbn` itself
+needs no Node APIs, confirmed via its own 0.0.8 release notes) -- so an
+archive built by one entry point is now **directly readable by the
+other**, verified for real (`test.mjs`, "browser.mjs toArchive/fromArchive"
+-- both directions). The glue code is still a separate copy, not a shared
+import of `lib/web-bundle.mjs`, because that module also imports
+`lib/hash.mjs` -> `node:crypto`, which has no browser resolution at all;
+`browser.mjs` computes its hash via Web Crypto's `crypto.subtle.digest`
+(async-only) instead. The two `isSafePath()`s are now **identical**
+(`browser.mjs`'s simpler substring/prefix check, not `from-archive.mjs`'s
+old `path.normalize()`-based one -- see `lib/web-bundle.mjs`'s own comment
+for why that direction was chosen), closing the divergence risk previously
+flagged here, though the duplication itself (two copies of one six-line
+function) remains, now deliberately, as the documented cost of staying
+`node:path`-free in the browser build.
+
+`browser.mjs`'s `toArchive` still silently drops `ToArchiveOptions
+.compressionLevel` -- unchanged from before, and still not fixable from
+this package's side: `lib/compression.browser.mjs`'s `CompressionStream`-
+based implementation has no numeric level parameter to plumb one through
+to at all.
+
+**Why the archive format is separate from the in-memory `Map`:** unchanged
+reasoning from before -- the archive is a single portable binary artifact
+meant to be written to one file (`packfile compress`), fetched over HTTP as
+one request, or embedded in a build output; the in-memory `Map`/
+`LazyFileMap` exists for O(1) path lookup during routing. Different formats
+for a genuine "at rest / single file" vs "in memory / keyed lookup" split.
 
 ## 3. Hash format
 
-**What it is:** a SHA-256 digest, hex-encoded (lowercase, via Node
-`crypto.createHash("sha256").digest("hex")`). Always a plain hex string
-(`FileEntry.hash`), never raw bytes or base64.
+**What it is:** a SHA-256 digest, hex-encoded (lowercase). Always a plain
+hex string (`FileEntry.hash`), never raw bytes or base64. Computed via
+Node's synchronous `crypto.createHash("sha256")` (`lib/hash.mjs`'s
+`hashBuffer()`) on the Node side; via the Web Crypto API's asynchronous
+`crypto.subtle.digest("SHA-256", ...)` in `browser.mjs` -- the same
+algorithm and same hex output, necessarily a different code path, since
+Node's synchronous `crypto` module has no browser equivalent.
 
-**Computed over:** the raw file bytes, at the point they're first read from
-disk -- in `fromDirectory()` (`lib/from-directory.mjs`, via
-`hashBuffer(data)`) and in `LazyFileMap.get()` (`lib/lazy-file-map.mjs`,
-recomputed fresh on every call, no caching). `lib/hash.mjs` also exports
-`hashStream()` for hashing a Node `Readable` incrementally, but nothing
-under `lib/` or the entry points actually calls `hashStream` -- it appears
-to be a public API convenience (documented in the README, re-exported from
-`./hash`) with no internal caller found in this codebase.
+**Computed over:** the raw file bytes -- at the point they're first read
+from disk in `fromDirectory()`/`LazyFileMap.get()` (unchanged from before),
+**and now also on the archive read path**, a real change from the previous
+format. `lib/hash.mjs` also exports `hashStream()` for hashing a Node
+`Readable` incrementally, but nothing under `lib/` or the entry points
+actually calls `hashStream` -- it appears to be a public API convenience
+(documented in the README, re-exported from `./hash`) with no internal
+caller found in this codebase.
 
-**Important gap found by reading the code, not assumed:** on the archive
-read path (`lib/from-archive.mjs` and `browser.mjs`'s `fromArchive`), the
-hash is **not recomputed or verified against `data`** -- it's read straight
-out of the decoded CBOR object (`hash: value.hash`) and trusted as-is. So
-`FileEntry.hash` is a genuine content hash only on the write/walk path
-(`fromDirectory`/`LazyFileMap`); once a `Map` has round-tripped through an
-archive, the hash is just carried metadata that nothing has re-verified
-against the bytes sitting next to it in the same entry. This matters
-because the hash is later used as an HTTP `ETag` (see §6) -- a corrupted or
-hand-edited archive entry (mismatched `data`/`hash`) would silently serve
-the wrong `ETag` for its actual content with no detection anywhere in this
-codebase.
+**The hash-trust gap previously documented here is now closed, as a side
+effect of the format change rather than a deliberate fix for it.** Under
+the old CBOR format, `fromArchive()`/`browser.mjs` read `hash` straight out
+of the decoded object and trusted it as-is, never re-verified against
+`data` -- a real, found gap: a corrupted or hand-edited archive entry
+(mismatched `data`/`hash`) would silently serve the wrong `ETag` (§6) for
+its actual content, with no detection anywhere in the codebase. A Web
+Bundle exchange has no hash field of any kind to carry that stale trust
+forward in the first place -- `lib/web-bundle.mjs`'s `fromWebBundle()`
+(and `browser.mjs`'s own read path) now *compute* `hash` from the response
+body on every read, the same way the write path always did. It is now
+structurally impossible for a returned `FileEntry.hash` to disagree with
+the bytes sitting next to it in the same entry, on either the write or the
+read path.
 
 **Downstream uses:**
 - **Content-addressing / change detection**: not explicitly implemented
@@ -333,7 +363,7 @@ preserved end-to-end), not a gap this document is proposing to fix.
 | # | Format | Produced by | Consumed by |
 |---|--------|-------------|-------------|
 | 1 | `FileEntry` / `FilesMap` (eager `Map` or `LazyFileMap`) | `fromDirectory`, `fromDirectoryLazy`, `fromArchive` (both impls) | `toArchive`, `createRouter`, `decompileDirectory` |
-| 2 | Archive bytes: `gzip(cbor({path: FileEntry}))` | `toArchive` (`lib/to-archive.mjs`, `browser.mjs`) | `fromArchive` (`lib/from-archive.mjs`, `browser.mjs`), `packfile.mjs` CLI |
+| 2 | Archive bytes: `gzip(application/webbundle)`, via `wbn` | `toArchive` (`lib/to-archive.mjs`, `browser.mjs`) | `fromArchive` (`lib/from-archive.mjs`, `browser.mjs`), `packfile.mjs` CLI |
 | 3 | Hash: SHA-256 hex string | `hashBuffer`/`hashStream` (`lib/hash.mjs`), inlined into `fromDirectory`/`LazyFileMap` | `lib/response.mjs` (ETag), `cache.mjs` (`withCache`, independently) |
 | 4 | Compression: gzip (Node `zlib` / Web `CompressionStream`) | `lib/compression.mjs`, `lib/compression.browser.mjs` | `toArchive`/`fromArchive` and their `browser.mjs` counterparts |
 | 5 | MIME lookup table | `lib/mime.mjs` | `lib/response.mjs` |
@@ -345,20 +375,25 @@ preserved end-to-end), not a gap this document is proposing to fix.
 These are genuine observations from reading the code, not tasks this
 document is asking anyone to fix:
 
-- `browser.mjs` reimplements the archive encode/decode and path-safety
-  logic independently of `lib/to-archive.mjs`/`lib/from-archive.mjs`
-  rather than sharing it, and the two `isSafePath()` implementations have
-  already diverged in strictness (§2).
-- `browser.mjs`'s `toArchive` silently ignores `compressionLevel` (§2, §4).
-- Archive-loaded `FileEntry.hash` values are never verified against
-  `data` (§3) -- the hash is only a true content hash on the
-  directory-read path.
-- `lib/from-archive.mjs` has a comment, `// Handle legacy archives that
-  have type: "content" field`, directly above code that does not check
-  for or handle any `type` field at all -- this looks like a leftover from
-  the older `FileInfo { type: "content" | "large-file" }` shape the
-  CHANGELOG says was removed during the split-file migration, and appears
-  to be stale.
+- ~~`browser.mjs` reimplements the archive encode/decode and path-safety
+  logic independently...~~ **Resolved** by the CBOR -> Web Bundle format
+  migration: both entry points now use the same `wbn` package and the same
+  `isSafePath()` algorithm (§2). The code itself is still a separate copy
+  (not a shared import), for a real, remaining reason -- `lib/web-bundle.mjs`
+  transitively imports `node:crypto` via `lib/hash.mjs`, which has no
+  browser resolution.
+- `browser.mjs`'s `toArchive` still silently ignores `compressionLevel`
+  (§2, §4) -- unrelated to the format migration, still open.
+- ~~Archive-loaded `FileEntry.hash` values are never verified against
+  `data`...~~ **Resolved**, also as a side effect of the format migration:
+  a Web Bundle exchange has no hash field to (mis)trust in the first place,
+  so `hash` is now always recomputed from the actual response body on
+  read (§3).
+- `lib/from-archive.mjs`'s old `// Handle legacy archives that have type:
+  "content" field` comment (referencing a `FileInfo` shape the CHANGELOG
+  says was already removed) no longer applies -- the file itself was
+  rewritten wholesale for the Web Bundle format and that stale comment is
+  gone with it, not fixed in place.
 - `hashStream()` (`lib/hash.mjs`) is exported and documented in the
   README but has no caller anywhere else in this codebase (source or
   tests) -- it may be intended purely as public API for consumers who have

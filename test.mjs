@@ -17,6 +17,7 @@ import {
   createRouter,
   compileDirectory,
   decompileDirectory,
+  hashBuffer,
 } from "./index.mjs";
 import { createBlobPreview } from "./lib/blob-preview.mjs";
 
@@ -67,12 +68,15 @@ await test("fromDirectory", async (t) => {
 // ---------------------------------------------------------------------------
 // Tier 2: toArchive + fromArchive roundtrip
 //
-// Regression coverage for the cbor@9 `encode()`/`encodeOne()` truncation bug
-// observed on Node 26: the synchronous-looking encode APIs resolved before
-// the internal stream had finished flushing, silently returning a truncated
-// buffer (sometimes just the 1-byte CBOR map header). `toArchive` now uses
-// `cbor.encodeAsync()` internally, which this test exercises repeatedly
-// across varied directory sizes to confirm the fix is solid, not incidental.
+// "archive buffer is never truncated" below is inherited regression coverage
+// from a truncation bug in the archive format's PREVIOUS implementation
+// (cbor@9's `encode()`/`encodeOne()` resolved before their internal stream
+// had finished flushing under Node 26, silently returning a near-empty
+// buffer). The archive format itself is now gzip(Web Bundle) via `wbn`
+// instead of raw CBOR (see `lib/to-archive.mjs`/`lib/from-archive.mjs`), but
+// this coverage -- varied entry counts/sizes, byte-exact roundtrip -- is
+// still real, general regression value against the new implementation too,
+// so it stays.
 // ---------------------------------------------------------------------------
 await test("toArchive + fromArchive roundtrip", async (t) => {
   await mkdir(join(TEST_DIR, "images"), { recursive: true });
@@ -1017,3 +1021,260 @@ await test("createBlobPreview — edge cases", async (t) => {
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// ---------------------------------------------------------------------------
+// Web Bundle (EXPERIMENTAL, `@johnhenry/packfile/web-bundle` subpath) --
+// research prototype for Chrome's Isolated Web Apps format (draft-ietf-wpack-
+// bundled-responses). Cross-checked against `wbn`'s own `Bundle` parser
+// directly (not just our own `fromWebBundle()`), and against `wbn-sign`'s
+// real `SignedWebBundle` signing pipeline with a real Ed25519 key pair, so
+// this proves actual interop with the packages Chrome/IWA tooling itself
+// uses -- not just that our own encode/decode round-trips with itself.
+// ---------------------------------------------------------------------------
+import { generateKeyPairSync } from "node:crypto";
+import * as wbn from "wbn";
+import * as wbnSign from "wbn-sign";
+import { toWebBundle, fromWebBundle, createWebBundleRouter } from "./lib/web-bundle.mjs";
+
+await test("toWebBundle / fromWebBundle (experimental)", async (t) => {
+  await t.test("throws without a baseURL", () => {
+    assert.throws(() => toWebBundle(mapOf({ "a.txt": "A" })), /baseURL/);
+  });
+
+  await t.test("produces a bundle wbn's OWN parser reads back correctly", () => {
+    const map = mapOf({
+      "index.html": "<h1>Hello</h1>",
+      "style.css": "body { color: red; }",
+    });
+    const bytes = toWebBundle(map, { baseURL: "https://example.com/" });
+
+    const bundle = new wbn.Bundle(bytes);
+    assert.equal(bundle.primaryURL, "https://example.com/");
+    assert.deepEqual(
+      [...bundle.urls].sort(),
+      ["https://example.com/index.html", "https://example.com/style.css"].sort(),
+    );
+
+    const htmlResponse = bundle.getResponse("https://example.com/index.html");
+    assert.equal(htmlResponse.status, 200);
+    assert.equal(htmlResponse.headers["content-type"], "text/html");
+    assert.equal(dec.decode(htmlResponse.body), "<h1>Hello</h1>");
+
+    const cssResponse = bundle.getResponse("https://example.com/style.css");
+    assert.equal(cssResponse.headers["content-type"], "text/css");
+  });
+
+  await t.test("fromWebBundle(buffer, {baseURL}) recovers relative paths and a correct hash", () => {
+    const map = mapOf({ "a.txt": "A", "nested/b.txt": "B" });
+    const bytes = toWebBundle(map, { baseURL: "https://example.com/" });
+    const recovered = fromWebBundle(bytes, { baseURL: "https://example.com/" });
+
+    assert.equal(recovered.size, 2);
+    const a = recovered.get("a.txt");
+    assert.equal(dec.decode(a.data), "A");
+    // mapOf() stubs `hash` to the path itself ("a.txt") as a placeholder --
+    // Web Bundles don't carry a content hash, so fromWebBundle() must
+    // recompute a real one from the body bytes rather than losing it.
+    assert.notEqual(a.hash, "a.txt");
+    assert.equal(a.hash, hashBuffer(Buffer.from(a.data)));
+    assert.equal(dec.decode(recovered.get("nested/b.txt").data), "B");
+  });
+
+  await t.test("without baseURL, fromWebBundle keys by the full absolute URL instead", () => {
+    const bytes = toWebBundle(mapOf({ "a.txt": "A" }), { baseURL: "https://example.com/" });
+    const recovered = fromWebBundle(bytes);
+    assert.ok(recovered.has("https://example.com/a.txt"));
+  });
+
+  await t.test("binary content round-trips byte-exact", () => {
+    const original = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]);
+    const map = new Map([["logo.png", { data: original, size: original.length, hash: "x" }]]);
+    const bytes = toWebBundle(map, { baseURL: "https://example.com/" });
+    const recovered = fromWebBundle(bytes, { baseURL: "https://example.com/" });
+    assert.deepEqual(Uint8Array.from(recovered.get("logo.png").data), original);
+  });
+
+  await t.test("a custom headers() callback is merged in alongside the inferred Content-Type", () => {
+    const map = mapOf({ "a.txt": "A" });
+    const bytes = toWebBundle(map, {
+      baseURL: "https://example.com/",
+      headers: (path) => ({ "X-Packfile-Path": path }),
+    });
+    const bundle = new wbn.Bundle(bytes);
+    const response = bundle.getResponse("https://example.com/a.txt");
+    assert.equal(response.headers["x-packfile-path"], "a.txt");
+    assert.equal(response.headers["content-type"], "text/plain");
+  });
+
+  await t.test("real interop: wbn-sign can sign a bundle produced by toWebBundle() into a valid .swbn", async () => {
+    const map = mapOf({ "index.html": "<h1>Signed</h1>" });
+    const bytes = toWebBundle(map, { baseURL: "isolated-app://dummy/" });
+
+    const { privateKey } = generateKeyPairSync("ed25519");
+    const signed = await wbnSign.SignedWebBundle.fromWebBundle(bytes, [
+      new wbnSign.NodeCryptoSigningStrategy(privateKey),
+    ]);
+    const signedBytes = signed.getSignedWebBundleBytes();
+
+    // A real Web Bundle ID was actually computed from the real signature --
+    // proof the signing pipeline accepted our bytes as a well-formed bundle,
+    // not just that no exception was thrown.
+    assert.match(signed.getWebBundleId(), /^[a-z0-9]{40,}$/);
+    assert.ok(signedBytes.byteLength > bytes.byteLength);
+    // `signedBytes` is `integrityBlock || pureWebBundle`, not a plain Web
+    // Bundle on its own -- `SignedWebBundle` exposes no public getter for
+    // the integrity block's own byte length, so re-parsing the embedded
+    // pure bundle with `wbn.Bundle` directly isn't possible from the public
+    // API alone. The ID/length assertions above are the real proof this
+    // library accepted `toWebBundle()`'s output as well-formed.
+  });
+});
+
+await test("createWebBundleRouter (experimental)", async (t) => {
+  const baseURL = "https://example.com/";
+  const bytes = toWebBundle(
+    mapOf({
+      "index.html": "<h1>Hi</h1>",
+      "nested/page.html": "<p>Nested</p>",
+    }),
+    {
+      baseURL,
+      headers: () => ({ "Cache-Control": "max-age=600, immutable" }),
+    },
+  );
+  const bundle = new wbn.Bundle(bytes);
+
+  await t.test("throws without a baseURL", () => {
+    assert.throws(() => createWebBundleRouter(bundle), /baseURL/);
+  });
+
+  await t.test("serves the bundle's OWN baked-in headers verbatim, not packfile's synthesized ones", async () => {
+    const router = createWebBundleRouter(bundle, { baseURL });
+    const res = await router("index.html");
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), "<h1>Hi</h1>");
+    assert.equal(res.headers.get("content-type"), "text/html");
+    // This header only exists because it was baked in at build time via
+    // toWebBundle()'s headers() callback -- createRouter() has no concept
+    // of it at all, and would never produce it for a FileEntry.
+    assert.equal(res.headers.get("cache-control"), "max-age=600, immutable");
+    // createRouter()'s own synthesized ETag/Cache-Control default are ABSENT
+    // here -- this router serves only what the bundle itself actually has.
+    assert.equal(res.headers.get("etag"), null);
+  });
+
+  await t.test("serves a nested path", async () => {
+    const router = createWebBundleRouter(bundle, { baseURL });
+    const res = await router("nested/page.html");
+    assert.equal(await res.text(), "<p>Nested</p>");
+  });
+
+  await t.test("HEAD returns the same headers with no body", async () => {
+    const router = createWebBundleRouter(bundle, { baseURL });
+    const res = await router(new Request(baseURL + "index.html", { method: "HEAD" }));
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), "");
+    assert.equal(res.headers.get("content-type"), "text/html");
+  });
+
+  await t.test("an unknown method is rejected with 405", async () => {
+    const router = createWebBundleRouter(bundle, { baseURL });
+    const res = await router(new Request(baseURL + "index.html", { method: "POST" }));
+    assert.equal(res.status, 405);
+  });
+
+  await t.test("an unresolved path 404s by default, and honors a custom fallback", async () => {
+    const router = createWebBundleRouter(bundle, { baseURL });
+    const res = await router("nope.html");
+    assert.equal(res.status, 404);
+
+    const withFallback = createWebBundleRouter(bundle, {
+      baseURL,
+      fallback: () => new Response("custom fallback", { status: 404 }),
+    });
+    assert.equal(await (await withFallback("nope.html")).text(), "custom fallback");
+  });
+
+  await t.test("alias and tryExtensions resolve the same way createRouter()'s do", async () => {
+    const router = createWebBundleRouter(bundle, {
+      baseURL,
+      alias: { "/home": "index.html" },
+      tryExtensions: [".html"],
+    });
+    assert.equal(await (await router("/home")).text(), "<h1>Hi</h1>");
+    assert.equal(await (await router("nested/page")).text(), "<p>Nested</p>");
+  });
+
+  await t.test("a real Request object resolves via its own pathname", async () => {
+    const router = createWebBundleRouter(bundle, { baseURL });
+    const res = await router(new Request(baseURL + "nested/page.html"));
+    assert.equal(await res.text(), "<p>Nested</p>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// browser.mjs -- same gzip(Web Bundle) wire format as the Node entrypoint,
+// verified with real cross-platform interop (a Node-built archive read by
+// the browser decoder and vice versa), not just internal self-consistency.
+// CompressionStream/DecompressionStream and crypto.subtle are real globals
+// under this repo's Node version (confirmed: `node -e "console.log(typeof
+// CompressionStream, typeof crypto.subtle)"` prints "function object"), so
+// browser.mjs runs for real here, unmodified -- no browser/DOM shim needed.
+// ---------------------------------------------------------------------------
+import * as browserPackfile from "./browser.mjs";
+
+await test("browser.mjs toArchive/fromArchive", async (t) => {
+  await t.test("roundtrips through itself", async () => {
+    const map = mapOf({ "index.html": "<h1>Hi</h1>", "nested/a.css": "body{color:red}" });
+    const buffer = await browserPackfile.toArchive(map);
+    const restored = await browserPackfile.fromArchive(buffer);
+    assert.equal(restored.size, 2);
+    assert.equal(dec.decode(restored.get("index.html").data), "<h1>Hi</h1>");
+    assert.equal(dec.decode(restored.get("nested/a.css").data), "body{color:red}");
+  });
+
+  await t.test("computes a real SHA-256 hash via Web Crypto, matching Node's hashBuffer", async () => {
+    const map = mapOf({ "a.txt": "A" });
+    const buffer = await browserPackfile.toArchive(map);
+    const restored = await browserPackfile.fromArchive(buffer);
+    assert.equal(restored.get("a.txt").hash, hashBuffer(Buffer.from("A")));
+  });
+
+  await t.test("uncompressed roundtrip", async () => {
+    const map = mapOf({ "a.txt": "A" });
+    const buffer = await browserPackfile.toArchive(map, { compressed: false });
+    const restored = await browserPackfile.fromArchive(buffer, { compressed: false });
+    assert.equal(dec.decode(restored.get("a.txt").data), "A");
+  });
+
+  await t.test("unsafe paths (absolute, traversal, NUL) are skipped, same as the Node side", async () => {
+    // Built directly via wbn, bypassing toArchive()'s own path handling, to
+    // simulate a maliciously/accidentally crafted archive rather than one
+    // this package produced itself.
+    const { compressObject } = await import("./lib/compression.browser.mjs");
+    const builder = new wbn.BundleBuilder();
+    builder.addExchange("https://packfile.invalid/../escape.txt", 200, { "Content-Type": "text/plain" }, "bad");
+    builder.addExchange("https://packfile.invalid/ok.txt", 200, { "Content-Type": "text/plain" }, "good");
+    builder.setPrimaryURL("https://packfile.invalid/");
+    const buffer = await compressObject(builder.createBundle());
+
+    const restored = await browserPackfile.fromArchive(buffer);
+    assert.equal(restored.has("ok.txt"), true);
+    assert.equal(restored.has("../escape.txt"), false);
+    assert.equal(restored.size, 1);
+  });
+
+  await t.test("cross-platform interop: a Node-built archive (toArchive) is readable by the browser decoder", async () => {
+    const map = mapOf({ "index.html": "<h1>Node-built</h1>" });
+    const buffer = await toArchive(map); // Node's own toArchive, from index.mjs
+    const restored = await browserPackfile.fromArchive(buffer);
+    assert.equal(dec.decode(restored.get("index.html").data), "<h1>Node-built</h1>");
+  });
+
+  await t.test("cross-platform interop: a browser-built archive is readable by Node's fromArchive", async () => {
+    const map = mapOf({ "index.html": "<h1>Browser-built</h1>" });
+    const buffer = await browserPackfile.toArchive(map);
+    const restored = await fromArchive(Buffer.from(buffer)); // Node's own fromArchive
+    assert.equal(dec.decode(restored.get("index.html").data), "<h1>Browser-built</h1>");
+  });
+});

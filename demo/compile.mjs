@@ -4,12 +4,12 @@ import theresWaldo from "theres-waldo";
 import { join } from "node:path";
 const { dir } = theresWaldo(import.meta.url);
 const DIR_STATIC = join(dir, "./static");
-const CBOR = join(dir, "./compiled.cbor");
-const CBOR_UNCOMPRESSED = join(dir, "./compiled.uncompressed.cbor");
+const WBN = join(dir, "./compiled.wbn");
+const WBN_UNCOMPRESSED = join(dir, "./compiled.uncompressed.wbn");
 try {
-  writeFileSync(CBOR, await compileDirectory(DIR_STATIC));
+  writeFileSync(WBN, await compileDirectory(DIR_STATIC));
   writeFileSync(
-    CBOR_UNCOMPRESSED,
+    WBN_UNCOMPRESSED,
     await compileDirectory(DIR_STATIC, {
       compress: false,
     })

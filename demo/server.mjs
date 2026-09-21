@@ -10,7 +10,7 @@ const { dir } = theresWaldo(import.meta.url);
 
 const port = 3000;
 
-const compiledData = readFileSync(join(dir, "./compiled.cbor"));
+const compiledData = readFileSync(join(dir, "./compiled.wbn"));
 const files = await fromArchive(compiledData, { compressed: true });
 const router = createRouter(files, { alias: { "/": "index.html" } });
 
