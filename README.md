@@ -1,5 +1,9 @@
 # Packfile
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Fpackfile.svg)](https://www.npmjs.com/package/@johnhenry/packfile)
+[![CI](https://github.com/johnhenry/packfile/actions/workflows/ci.yml/badge.svg)](https://github.com/johnhenry/packfile/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Fpackfile.svg)](LICENSE)
+
 > Previously developed as `lemem`, never published under that name. Now
 > `@johnhenry/packfile`, starting at `0.0.0`.
 
@@ -8,6 +12,33 @@ gzip(`application/webbundle`), the format Chrome's Isolated Web Apps are
 built on, via the real [`wbn`](https://github.com/WICG/webpackage/tree/main/js/bundle)
 package -- and serves them as HTTP responses via the `(Request) => Response`
 handler pattern.
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Compress a folder](#compress-a-folder)
+  - [Decompress a file](#decompress-a-file)
+  - [Serve a compiled file](#serve-a-compiled-file)
+- [Examples](#examples)
+- [Node.js API](#nodejs-api)
+  - [`fromDirectory(path, options?)`](#fromdirectorypath-options)
+  - [`fromDirectoryLazy(path, options?)`](#fromdirectorylazypath-options)
+  - [`toArchive(map, options?)`](#toarchivemap-options)
+  - [`fromArchive(buffer, options?)`](#fromarchivebuffer-options)
+  - [`createRouter(files, options?)`](#createrouterfiles-options)
+  - [`hashBuffer(buffer)` / `hashStream(stream)`](#hashbufferbuffer--hashstreamstream)
+  - [`compileDirectory(path, options?)` / `decompileDirectory(data, outputPath)`](#compiledirectorypath-options--decompiledirectorydata-outputpath)
+- [HTTP Caching Middleware](#http-caching-middleware)
+- [Browser Usage](#browser-usage)
+- [Blob Preview (host packaged content in a browser tab/iframe, no server)](#blob-preview-host-packaged-content-in-a-browser-tabiframe-no-server)
+  - [What this does and does not solve](#what-this-does-and-does-not-solve)
+- [Web Bundle / Isolated Web App primitives (`./web-bundle`)](#web-bundle--isolated-web-app-primitives-web-bundle)
+- [Direct Imports](#direct-imports)
+- [Exports](#exports)
+- [Family](#family)
+- [Internal formats](#internal-formats)
+- [License](#license)
 
 ## Installation
 
@@ -370,6 +401,31 @@ import { compressObject, deCompressObject } from '@johnhenry/packfile/compressio
 | `./compat` | `compat.mjs` | `compileDirectory`, `decompileDirectory` |
 | `./blob-preview` | `lib/blob-preview.mjs` | `createBlobPreview` — host a `FilesMap` client-side via `blob:` URLs, no server |
 | `./web-bundle` | `lib/web-bundle.mjs` | Lower-level Web Bundle primitives: `toWebBundle`, `fromWebBundle`, `createWebBundleRouter` — the engine `toArchive`/`fromArchive` are built on, with a real `baseURL`/headers/IWA-signing exposed |
+
+## Family
+
+packfile isn't just a standalone compiler/server -- it's the designed
+consumer of one sibling package's archive output, and a drop-in handler for
+another's router.
+
+- **[`@johnhenry/fileable`](https://github.com/johnhenry/fileable)** --
+  fileable's `<Dir encode="wbn">` renders a subtree to a
+  `gzip(application/webbundle)` archive, via the same `wbn` package packfile
+  itself depends on directly (a real dependency on `wbn`, **not** on
+  `@johnhenry/packfile` -- fileable produces byte-for-byte the same archive
+  format without needing this package as an intermediate, and isn't even
+  published to npm). The resulting `.wbn` file is directly readable by this
+  package's own `fromArchive()` (back into a flat path -> content map) and
+  servable via `createRouter()`/`createWebBundleRouter()` -- no unpacking to
+  disk needed.
+- **[`@johnhenry/servable`](https://github.com/johnhenry/servable)** --
+  `createRouter()` already returns a `(Request | path, ctx?) => Response`
+  handler (it even aliases itself as `.fetch`), the exact shape servable's
+  `Route`'s `handler` prop accepts -- mounting a packfile-served directory
+  inside a servable app is just passing a function, no new integration
+  surface needed. See `examples/08-mount-packfile` in the servable repo for
+  a real, running mount (`Route path="/*"` inside a `Group prefix="/mem"`,
+  forwarding the wildcard-captured path straight to the router).
 
 ## Internal formats
 
