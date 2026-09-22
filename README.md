@@ -4,6 +4,8 @@
 [![CI](https://github.com/johnhenry/packfile/actions/workflows/ci.yml/badge.svg)](https://github.com/johnhenry/packfile/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/%40johnhenry%2Fpackfile.svg)](LICENSE)
 
+Full documentation: [opensource.johnhenry.me/packfile](https://opensource.johnhenry.me/packfile/)
+
 > Previously developed as `lemem`, never published under that name. Now
 > `@johnhenry/packfile`, starting at `0.0.0`.
 
@@ -13,7 +15,7 @@ built on, via the real [`wbn`](https://github.com/WICG/webpackage/tree/main/js/b
 package -- and serves them as HTTP responses via the `(Request) => Response`
 handler pattern.
 
-## Table of Contents
+## Contents
 
 - [Installation](#installation)
 - [Usage](#usage)
@@ -36,6 +38,7 @@ handler pattern.
 - [Web Bundle / Isolated Web App primitives (`./web-bundle`)](#web-bundle--isolated-web-app-primitives-web-bundle)
 - [Direct Imports](#direct-imports)
 - [Exports](#exports)
+- [Security model](#security-model)
 - [Family](#family)
 - [Internal formats](#internal-formats)
 - [License](#license)
@@ -401,6 +404,43 @@ import { compressObject, deCompressObject } from '@johnhenry/packfile/compressio
 | `./compat` | `compat.mjs` | `compileDirectory`, `decompileDirectory` |
 | `./blob-preview` | `lib/blob-preview.mjs` | `createBlobPreview` — host a `FilesMap` client-side via `blob:` URLs, no server |
 | `./web-bundle` | `lib/web-bundle.mjs` | Lower-level Web Bundle primitives: `toWebBundle`, `fromWebBundle`, `createWebBundleRouter` — the engine `toArchive`/`fromArchive` are built on, with a real `baseURL`/headers/IWA-signing exposed |
+
+## Security model
+
+**What packfile guarantees:**
+
+- **Decoding an archive never writes outside the archive root.** `fromArchive()`
+  (and `fromWebBundle()`, which it's built on) rejects any entry whose path
+  would escape the archive's own base -- a leading slash or backslash, a
+  `..` segment anywhere in the path, a NUL byte, or an empty/`.` path -- via
+  `isSafePath()` in `lib/web-bundle.mjs`. A rejected entry is silently
+  skipped rather than written, so an archive built to escape its extraction
+  root (a "zip-slip"-shaped attack) cannot use `fromArchive()`/
+  `decompileDirectory()` to do it.
+- **`createRouter()` never serves outside the file map it was given.** It
+  only ever resolves against the in-memory `FilesMap` (or `LazyFileMap`)
+  built by `fromDirectory()`/`fromArchive()`/your own code -- there is no
+  filesystem access at request time, so a crafted request path cannot read
+  anything not already present in that map.
+
+**What is still yours:**
+
+- **`createBlobPreview()` is for trusted, your-own content only** -- not a
+  general solution for arbitrary/untrusted content (see "What this does and
+  does not solve" above). It rewrites references so packaged content
+  renders correctly in an `<iframe>`, but does not sandbox or sanitize that
+  content -- treat a `FilesMap` built from an untrusted source the same as
+  you would any other untrusted HTML/CSS/JS you're about to render.
+- **`createRouter()`'s `alias`/`tryExtensions`/`fallback` are caller-supplied
+  and unvalidated.** A `fallback` handler that itself reads from the
+  filesystem or the network based on the unmatched path reintroduces
+  exactly the kind of path-controlled access this package's own
+  `isSafePath()` guards against on decode -- that's the fallback's
+  responsibility, not this package's.
+- **`toWebBundle()`/`createWebBundleRouter()`'s `baseURL` is not authenticated.**
+  Signing a bundle with `wbn-sign` (for real Isolated Web App deployment)
+  is a separate step this package exposes but does not perform for you --
+  an unsigned bundle carries no origin guarantee at all.
 
 ## Family
 
