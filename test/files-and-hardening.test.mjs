@@ -51,7 +51,7 @@ for (const [name, lib] of [["node entry", node], ["browser entry", browser]]) {
         "a.txt": "hi",
         "img.png": new Uint8Array([1, 2]),
         "bad.txt": new Uint8Array([0xff, 0xfe]),
-        "__proto__": "evil",
+        ["__proto__"]: "evil", // computed: a plain "__proto__" literal would set the prototype
       });
       const raw = lib.toFiles(map);
       assert.ok(raw["a.txt"] instanceof Uint8Array);
@@ -115,7 +115,7 @@ await test("browser fromArchive: hardened against untrusted input", async (t) =>
     ["a%5cb.txt", "backslash"],
     ["a\\b.txt", "backslash"],
     ["n%00l.txt", "control-character"],
-    ["/etc/passwd", "empty-segment"], // https://packfile.invalid//etc/passwd
+    ["/etc/passwd", "absolute"], // https://packfile.invalid//etc/passwd
     ["a/./b", "dot-segment"],
     ["a%2f%2fb", "empty-segment"],
     ["q?x=1", "query-or-fragment"],
@@ -138,7 +138,7 @@ await test("browser fromArchive: hardened against untrusted input", async (t) =>
 
   await t.test("rejects an exchange outside the archive base URL", async () => {
     const b = new wbn.BundleBuilder();
-    b.addExchange("https://evil.example/x.txt", 200, {}, "x");
+    b.addExchange("https://evil.example/x.txt", 200, { "Content-Type": "text/plain" }, "x");
     b.setPrimaryURL("https://evil.example/x.txt");
     const archive = new Uint8Array(gzipSync(b.createBundle()));
     await assert.rejects(() => browser.fromArchive(archive), { reason: "outside-base" });
@@ -207,8 +207,8 @@ await test("node web-bundle path safety: shared stricter validator", async (t) =
   const { fromWebBundle } = await import("../lib/web-bundle.mjs");
   await t.test("skips encoded traversal / backslash / outside-base, keeps 'a..b'", () => {
     const b = new wbn.BundleBuilder();
-    for (const s of ["ok.txt", "%2e%2e/x", "a%5cb", "a..b.txt"]) b.addExchange(`${BASE}${s}`, 200, {}, "x");
-    b.addExchange("https://evil.example/y", 200, {}, "x");
+    for (const s of ["ok.txt", "%2e%2e/x", "a%5cb", "a..b.txt"]) b.addExchange(`${BASE}${s}`, 200, { "Content-Type": "text/plain" }, "x");
+    b.addExchange("https://evil.example/y", 200, { "Content-Type": "text/plain" }, "x");
     b.setPrimaryURL(BASE);
     const map = fromWebBundle(b.createBundle(), { baseURL: BASE });
     assert.deepEqual([...map.keys()].sort(), ["a..b.txt", "ok.txt"]);

@@ -1247,7 +1247,7 @@ await test("browser.mjs toArchive/fromArchive", async (t) => {
     assert.equal(dec.decode(restored.get("a.txt").data), "A");
   });
 
-  await t.test("unsafe paths (absolute, traversal, NUL) are skipped, same as the Node side", async () => {
+  await t.test("unsafe paths (absolute, traversal, NUL) throw by default; unsafePaths skip matches the Node side", async () => {
     // Built directly via wbn, bypassing toArchive()'s own path handling, to
     // simulate a maliciously/accidentally crafted archive rather than one
     // this package produced itself.
@@ -1258,7 +1258,8 @@ await test("browser.mjs toArchive/fromArchive", async (t) => {
     builder.setPrimaryURL("https://packfile.invalid/");
     const buffer = await compressObject(builder.createBundle());
 
-    const restored = await browserPackfile.fromArchive(buffer);
+    await assert.rejects(() => browserPackfile.fromArchive(buffer), { code: "ERR_PACKFILE_INVALID_PATH", reason: "traversal" });
+    const restored = await browserPackfile.fromArchive(buffer, { unsafePaths: "skip" });
     assert.equal(restored.has("ok.txt"), true);
     assert.equal(restored.has("../escape.txt"), false);
     assert.equal(restored.size, 1);
