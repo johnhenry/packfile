@@ -2,7 +2,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { constants } from "node:zlib";
+import { exportDirectory } from "./lib/build-node.mjs";
 import { fromDirectory } from "./lib/from-directory.mjs";
 import { toArchive } from "./lib/to-archive.mjs";
 import { fromArchive } from "./lib/from-archive.mjs";
@@ -18,6 +18,12 @@ const [, , command, ...args] = process.argv;
 
 try {
   switch (command) {
+    case "export": {
+      if (args.length !== 2) throw new Error("Usage: packfile export <build-directory> <output.wbn>");
+      const result = await exportDirectory(args[0], args[1]);
+      log("info", `Exported ${result.files.length} files to ${args[1]} (sha256 ${result.sha256})`);
+      break;
+    }
     case "compress": {
       if (args.length < 2 || args.length > 3) {
         throw new Error("Usage: packfile compress <path-to-folder> <path-to-file> [compression-level]");
@@ -81,7 +87,7 @@ try {
       break;
     }
     default:
-      throw new Error("Unknown command. Available commands: compress, decompress, serve");
+      throw new Error("Unknown command. Available commands: export, compress, decompress, serve");
   }
 } catch (error) {
   log("error", error.message);

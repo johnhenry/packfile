@@ -22,6 +22,7 @@ handler pattern.
   - [Compress a folder](#compress-a-folder)
   - [Decompress a file](#decompress-a-file)
   - [Serve a compiled file](#serve-a-compiled-file)
+- [Export a build as `.wbn`](#export-a-build-as-wbn)
 - [Examples](#examples)
 - [Node.js API](#nodejs-api)
   - [`fromDirectory(path, options?)`](#fromdirectorypath-options)
@@ -76,6 +77,108 @@ npx packfile serve <path-to-file> [port]
 ```
 
 This command serves the compiled file at `<path-to-file>` on the specified `[port]` (default is 3000).
+
+## Export a build as `.wbn`
+
+Install `@johnhenry/packfile` as a development dependency. These adapters package
+**already-built files** using packfile's existing gzip(Web Bundle) format. They
+preserve relative filenames and bytes, infer MIME types from extensions (unknown
+extensions use `application/octet-stream`), and reject unsafe paths,
+case-insensitive filename collisions, and file/directory collisions.
+
+### Vite
+
+```js
+// vite.config.mjs
+import { defineConfig } from 'vite';
+import packfile from '@johnhenry/packfile/vite';
+
+export default defineConfig({
+  plugins: [packfile({ fileName: 'app.wbn' })],
+});
+```
+
+`vite build` also writes `dist/app.wbn`. The plugin archives the completed client
+output directory, including HTML, CSS, chunks, source maps, and files copied from
+`public/`. Put it last among plugins that modify output. It runs after ordinary
+`closeBundle` hooks; later post-ordered hooks must not modify files afterward.
+It does nothing during the dev server. SSR and `build.write: false` are rejected.
+For in-memory builds use `exportBuild()` instead.
+
+`fileName` defaults to `app.wbn` and must be a relative path ending in `.wbn`.
+That destination is **reserved**: do not put a source/public asset there. An older
+archive at that exact path is excluded on rebuild and replaced atomically. Other
+files already in the output directory are included; keep Vite's default
+`emptyOutDir` behavior if you do not want stale files packaged. One plugin instance
+is intended for one client build configuration, not a multi-environment framework
+build or a server bundle.
+
+### Rollup / Rolldown
+
+```js
+import packfile from '@johnhenry/packfile/rollup';
+
+export default {
+  input: 'src/main.js',
+  plugins: [/* other build plugins, */ packfile()],
+  output: { dir: 'dist', format: 'es' },
+};
+```
+
+This plugin emits `app.wbn` from the chunks and assets available in its
+`generateBundle` hook. Put it last. It also works with Rolldown's `generate()`
+without writing to disk. Files copied outside the bundler's output (such as a
+separate public directory) are not included by this adapter. It refuses to replace
+an asset already named `app.wbn`; each output gets its own archive. HTML/CSS handling
+must be supplied by your build tool/plugins.
+
+### CLI / Node directory export
+
+```sh
+npx --package @johnhenry/packfile packfile export ./dist ./app.wbn
+```
+
+```js
+import { exportDirectory } from '@johnhenry/packfile/build-node';
+const result = await exportDirectory('./dist', './app.wbn');
+console.log(result.sha256);
+```
+
+The CLI uses the same validation and excludes its own destination on repeated
+exports. It creates missing destination directories and replaces the destination
+only after encoding succeeds. Directory traversal follows packfile's existing
+symlink policy: external, broken, and cyclic symlinks are skipped.
+
+### In-memory export (Node or browser)
+
+```js
+import { exportBuild, exportFiles } from '@johnhenry/packfile/build';
+
+// Rollup/Rolldown's result.output, including @rolldown/browser output:
+const { archive, sha256, files } = await exportBuild(result.output);
+
+// Or supply your own already-built assets:
+const packaged = await exportFiles({
+  'index.html': '<h1>Hello</h1>',
+  'assets/data.bin': new Uint8Array([0, 255]),
+});
+```
+
+`archive` is a `Uint8Array` readable by Node or browser `fromArchive()`.
+`sha256` is a hex digest of those archive bytes, **not a p2pws CID**.
+`files` lists each path, byte size, content SHA-256, and inferred `contentType`.
+Entries are sorted by path before encoding; no timestamp or manifest is injected.
+The `./build` and `./rollup` modules use no Node built-ins. Browser use requires
+bundling their npm dependencies and the same Web Crypto / CompressionStream APIs
+as `@johnhenry/packfile/browser` (Web Crypto requires a secure context).
+
+The entire build and archive are held in memory. Empty builds are rejected.
+There is no source compilation, URL rewriting, dependency fetching, secret-file
+filtering, p2pws release metadata, or IWA signing. Check the files in your build
+output before distributing it. A `.wbn` here is packfile's **gzip-wrapped archive**,
+not a raw Web Bundle or signed `.swbn`, and browsers do not generally open these
+archives as standalone websites. Use packfile's reader/router or a compatible host.
+The existing `./web-bundle` API remains available for raw Web Bundles.
 
 ## Examples
 
@@ -438,6 +541,10 @@ import { compressObject, deCompressObject } from '@johnhenry/packfile/compressio
 |--------|------|-------------|
 | `.` | `index.mjs` | Full API: `fromDirectory`, `fromArchive`, `toArchive`, `createRouter`, `hashBuffer`, etc. |
 | `./browser` | `browser.mjs` | Browser-compatible: hardened `fromArchive`, `toArchive`, `fromFiles`, `toFiles`, `createRouter`, error classes |
+| `./build` | `lib/build.mjs` | Browser-safe `exportFiles` / `exportBuild` with archive and file hashes |
+| `./build-node` | `lib/build-node.mjs` | `exportDirectory` with atomic destination replacement |
+| `./vite` | `lib/vite.mjs` | Vite client-build exporter including public assets |
+| `./rollup` | `lib/rollup.mjs` | Rollup/Rolldown archive emission plugin |
 | `./cache` | `cache.mjs` | `withCache` — HTTP caching middleware |
 | `./hash` | `lib/hash.mjs` | `hashBuffer`, `hashStream` |
 | `./compression` | `lib/compression.mjs` | `compressObject`, `deCompressObject` |

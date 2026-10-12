@@ -65,7 +65,8 @@ A change is done when all of the following hold, not just when tests pass:
 
 ## Releases
 
-Bump `version` in `package.json` in a PR, add the `CHANGELOG.md` entry, merge,
-then `gh release create v<version>` — the release event triggers
-`.github/workflows/publish.yml`, which is idempotent (skips if the version is
-already on npm).
+Bump `version` in `package.json` and `package-lock.json` in a PR and add a
+`CHANGELOG.md` entry. Merge after green CI. `.github/workflows/publish.yml`
+publishes new versions on pushes to `main`, then creates the tag and GitHub
+Release. It is idempotent (skips versions already on npm); `workflow_dispatch`
+can retry a failed run. Verify the workflow and npm artifact after merging.
