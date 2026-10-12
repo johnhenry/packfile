@@ -1,4 +1,4 @@
-import { FilesMap } from "./types";
+import { FilesMap } from "./types.js";
 
 export { FilesMap };
 
@@ -8,8 +8,8 @@ export { FilesMap };
 /** Why a reference was left unrewritten (see README "What this does and
  * does not solve"): either the target path doesn't exist in the given
  * `FilesMap` ("missing"), or resolving it would require a file that's
- * still mid-finalization -- a genuine reference cycle ("cycle"). */
-export type UnresolvedReferenceReason = "missing" | "cycle";
+ * still mid-finalization -- a genuine reference cycle ("cycle"), or a JS file the module lexer could not parse ("unparseable"). */
+export type UnresolvedReferenceReason = "missing" | "cycle" | "unparseable";
 
 export type UnresolvedReferenceInfo = {
   reason: UnresolvedReferenceReason;
@@ -76,6 +76,12 @@ export type BlobPreview = {
 };
 
 /**
+ * Relative ES-module specifiers in .js/.mjs/.cjs files (static `import`,
+ * `export ... from`, `export * from`, side-effect `import`, and string-literal
+ * dynamic `import()`) are rewritten to the dependency's blob URL in
+ * module-graph order; a cycle's closing edge is reported with reason
+ * `"cycle"` and left unrewritten.
+ *
  * Turn a packfile `FilesMap` into a set of `blob:` URLs suitable for hosting
  * inside a browser tab/iframe with no server. For trusted/your-own content
  * only -- see README's "What this does and does not solve".

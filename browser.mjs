@@ -21,73 +21,37 @@
  * `DecompressionStream` here instead of Node's `zlib` -- both were already
  * platform-specific before this change and stay that way.
  */
-import { deCompressObject, compressObject } from "./lib/compression.browser.mjs";
+import { compressObject } from "./lib/compression.browser.mjs";
 import { getContentType } from "./lib/mime.mjs";
+import { encodePath } from "./lib/path-safety.mjs";
+import { aliasedOption } from "./lib/options.mjs";
+import { readArchiveSafely, ARCHIVE_BASE_URL, DEFAULT_LIMITS } from "./lib/safe-archive.mjs";
 import * as wbn from "wbn";
 
 export { createRouter } from "./lib/create-router.mjs";
+export { fromFiles, toFiles } from "./lib/files.mjs";
+export { PackfileError, InvalidPathError, ArchiveLimitError, InvalidArchiveError } from "./lib/errors.mjs";
+export { DEFAULT_LIMITS };
 
-const ARCHIVE_BASE_URL = "https://packfile.invalid/";
+/**
+ * Hardened for untrusted input (see `lib/safe-archive.mjs`): path
+ * validation, `maxEntries` / `maxTotalSize` limits, typed errors.
+ * Options: `compressed` (alias `compress`), `maxEntries`, `maxTotalSize`,
+ * `unsafePaths: "throw" | "skip"`.
+ */
+export const fromArchive = (buffer, opts = {}) => readArchiveSafely(buffer, opts);
 
-// Same coarse, pure-string check as lib/web-bundle.mjs's own (duplicated,
-// not imported -- that module also pulls in lib/hash.mjs's Node-only
-// `node:crypto` import, which has no browser resolution at all).
-const isSafePath = (p) => {
-  if (p.startsWith("/") || p.startsWith("\\")) return false;
-  if (p.includes("..")) return false;
-  if (p.includes("\0")) return false;
-  if (p === "" || p === ".") return false;
-  return true;
-};
-
-const stripBaseURL = (url, baseURL) => {
-  const base = baseURL.endsWith("/") ? baseURL : `${baseURL}/`;
-  return url.startsWith(base) ? url.slice(base.length) : url;
-};
-
-const sha256Hex = async (data) => {
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-};
-
-export const fromArchive = async (buffer, opts = {}) => {
-  const { compressed = true } = opts;
-
-  if (compressed) {
-    buffer = await deCompressObject(buffer);
-  }
-
-  const bundle = new wbn.Bundle(buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer);
-  const files = new Map();
-
-  for (const url of bundle.urls) {
-    const relativeKey = stripBaseURL(url, ARCHIVE_BASE_URL);
-    if (!isSafePath(relativeKey)) continue;
-
-    const response = bundle.getResponse(url);
-    files.set(relativeKey, {
-      data: response.body,
-      size: response.body.byteLength,
-      hash: await sha256Hex(response.body),
-    });
-  }
-
-  return files;
-};
-
+/** Resolves to a `Uint8Array` (compressed or not). Options: `compress` (alias `compressed`). */
 export const toArchive = async (map, opts = {}) => {
-  const { compressed = true } = opts;
+  const compress = aliasedOption(opts, "compress", "compressed", true);
 
   const builder = new wbn.BundleBuilder();
   for (const [path, entry] of map) {
-    const url = new URL(path, ARCHIVE_BASE_URL).toString();
+    const url = new URL(encodePath(path), ARCHIVE_BASE_URL).toString();
     builder.addExchange(url, 200, { "Content-Type": getContentType(path) }, entry.data);
   }
   builder.setPrimaryURL(ARCHIVE_BASE_URL);
 
-  let buffer = builder.createBundle();
-  if (compressed) {
-    buffer = await compressObject(buffer);
-  }
-  return buffer;
+  const bundle = builder.createBundle();
+  return compress ? new Uint8Array(await compressObject(bundle)) : bundle;
 };

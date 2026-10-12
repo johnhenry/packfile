@@ -18,7 +18,7 @@ async function assertBlobPreviewTypes(): Promise<void> {
     rootPath: "index.html",
     strict: false,
     onUnresolvedReference: (info) => {
-      const reason: "missing" | "cycle" = info.reason;
+      const reason: "missing" | "cycle" | "unparseable" = info.reason;
       const targetPath: string = info.targetPath;
       const fromPath: string = info.fromPath;
       void reason;

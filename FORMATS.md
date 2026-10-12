@@ -122,9 +122,10 @@ the default) via `lib/compression.mjs`'s `deCompressObject`, then parses
 via `wbn.Bundle` and strips `ARCHIVE_BASE_URL` back off each exchange's
 URL to recover the relative path. Every resulting path is still run through
 an `isSafePath()` check (now living inside `fromWebBundle()` itself, applied
-whenever a `baseURL` is given) -- rejects a leading `/`/`\`, any `..`
-substring, an embedded NUL byte, or the empty/`"."` path -- and unsafe
-entries are **silently dropped** rather than throwing, same behavior as
+whenever a `baseURL` is given; since 0.1.0 it is the shared `urlToPath()` in
+`lib/path-safety.mjs`, which percent-decodes first and rejects `..`/`.`/empty
+segments, absolute paths, backslashes, control characters, query/fragment and
+foreign origins) -- and unsafe entries are **silently dropped** rather than throwing, same behavior as
 before (see the CHANGELOG's "Archive path-validation gap" entry for why).
 
 **The hash-trust gap that existed here is now closed as a side effect, not
@@ -151,7 +152,10 @@ other**, verified for real (`test.mjs`, "browser.mjs toArchive/fromArchive"
 import of `lib/web-bundle.mjs`, because that module also imports
 `lib/hash.mjs` -> `node:crypto`, which has no browser resolution at all;
 `browser.mjs` computes its hash via Web Crypto's `crypto.subtle.digest`
-(async-only) instead. The two `isSafePath()`s are now **identical**
+(async-only) instead. (Since 0.1.0 the path check is a single shared module, `lib/path-safety.mjs`,
+used by both readers; the browser reader is `lib/safe-archive.mjs`, which adds
+size limits and throws typed errors by default. The paragraph below describes
+the earlier state.) The two `isSafePath()`s were **identical**
 (`browser.mjs`'s simpler substring/prefix check, not `from-archive.mjs`'s
 old `path.normalize()`-based one -- see `lib/web-bundle.mjs`'s own comment
 for why that direction was chosen), closing the divergence risk previously

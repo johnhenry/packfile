@@ -2,7 +2,7 @@
 
 `@johnhenry/packfile` — content-addressed static-file archiver and
 in-memory HTTP router. Single package, Node >= 26, `node --test`
-(`npm test`, runs `test.mjs`), ships source directly -- no build step,
+(`npm test`, runs `test.mjs` and `test/*.test.mjs`), ships source directly -- no build step,
 `main`/`exports` point straight at `index.mjs`/`lib/*.mjs`. The library is
 mostly platform-agnostic (Node and browser entrypoints share the same wire
 format), so a change to the archive format touches both `lib/web-bundle.mjs`
@@ -15,7 +15,7 @@ drifted before.
 
 1. `npm test` -- `node --test test.mjs`. No suite here is allowed to SKIP.
 2. `npm pack --dry-run` -- read the file list, not just the exit code;
-   `files` is `index.mjs`, `browser.mjs`, `compat.mjs`, `cache.mjs`,
+   `files` is `index.mjs`, `browser.mjs`, `compat.mjs`, `cache.mjs`, the `.d.ts` files,
    `packfile.mjs`, `lib/`, `types.d.ts`, `types.ts`, `README.md`, `LICENSE`.
 3. A genuinely fresh clone:
    `git clone . /tmp/packfile-verifyN && cd $_ && npm ci && npm test`.
@@ -38,7 +38,7 @@ CI (`.github/workflows/ci.yml`) runs `npm test`; match it locally.
   `lib/from-archive.mjs` needs the equivalent change checked against
   `browser.mjs`, not assumed to be shared code.
 - **Path safety for decoded archive entries lives in one place:
-  `isSafePath()` in `lib/web-bundle.mjs`.** A relative key that would
+  `lib/path-safety.mjs`** (`checkPath()`/`urlToPath()`; the browser reader is `lib/safe-archive.mjs`). A relative key that would
   escape the `baseURL` (leading slash, `..`, a NUL byte, empty/`.`) is
   silently skipped by `fromWebBundle()`, not an error -- don't duplicate a
   second, differently-shaped check elsewhere; extend this one instead.

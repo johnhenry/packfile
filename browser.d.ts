@@ -1,72 +1,93 @@
-import { FileEntry, FilesMap, RouterOptions, RouteHandler } from "./types";
+import {
+  FileEntry,
+  FilesMap,
+  RouterOptions,
+  RouteHandler,
+  Files,
+  ToFilesOptions,
+  InvalidPathReason,
+} from "./types.js";
 
-export { FileEntry, FilesMap, RouterOptions, RouteHandler };
+export {
+  FileEntry,
+  FilesMap,
+  RouterOptions,
+  RouteHandler,
+  Files,
+  ToFilesOptions,
+  InvalidPathReason,
+};
+export {
+  PackfileError,
+  InvalidPathError,
+  ArchiveLimitError,
+  InvalidArchiveError,
+} from "./types.js";
 
 // Note: `browser.d.ts` describes the `./browser` entry point (`browser.mjs`),
 // not the main `.` entry (see `types.d.ts` for that). `createRouter` is the
-// exact same implementation as the `.` entry's (both import
-// `./lib/create-router.mjs`), so its types are reused unchanged. `toArchive`
-// and `fromArchive`, however, are a *separate* implementation from the Node
-// entry's (`lib/to-archive.mjs`/`lib/from-archive.mjs`) -- same wire format,
-// but different runtime types, because there is no `Buffer` in a browser:
+// exact same implementation as the `.` entry's. `toArchive` and
+// `fromArchive` are a *separate* implementation from the Node entry's (same
+// wire format; Web Streams + Web Crypto instead of `zlib`/`node:crypto`),
+// so their runtime types differ:
 //
-// - `toArchive()`'s options key is `compressed` here, not `compress` (the
-//   Node entry's key) -- a real, pre-existing naming inconsistency between
-//   the two entrypoints, not a typo introduced by this file. There is also
-//   no `compressionLevel` option here (browser.mjs's own comment notes
-//   `CompressionStream` has no level parameter to plumb one through to).
-// - `toArchive()` returns a `Uint8Array` when called with
-//   `{ compressed: false }` (the raw, uncompressed Web Bundle from
-//   `wbn`'s `BundleBuilder.createBundle()`), and an `ArrayBuffer` when
-//   compression runs (the default): `compressObject()`
-//   (`lib/compression.browser.mjs`) pipes through `CompressionStream` and
-//   resolves via `Response#arrayBuffer()`. The Node entry's `toArchive()`,
-//   by contrast, always returns a `Buffer`. Don't assume this matches the
-//   Node types -- confirmed by reading both implementations, not guessed.
-// - `fromArchive()`'s `buffer` parameter is `ArrayBuffer | Uint8Array`, not
-//   `Buffer | ArrayBuffer | Uint8Array` like the Node entry -- there is no
-//   `Buffer` global to accept in a browser build.
+// - Option names: `compress` is canonical for `toArchive()`, `compressed`
+//   for `fromArchive()`, and each accepts the other as an alias (as does the
+//   Node entry). Passing both with different values throws a `TypeError`.
+//   There is no `compressionLevel` here (`CompressionStream` has none).
+// - `toArchive()` resolves to a plain `Uint8Array` (compressed or not). The
+//   Node entry resolves to a `Buffer`, which is a `Uint8Array` subclass, so
+//   code typed against `Uint8Array` works with both. (Before 0.1.0 this
+//   returned an `ArrayBuffer` when compressing.)
+// - `fromArchive()` is hardened for untrusted input and accepts
+//   `ArrayBuffer | Uint8Array` (there is no `Buffer` in a browser build).
 
 export type BrowserToArchiveOptions = {
-  /** Default `true`. When `false`, skips compression and returns the raw
-   * Web Bundle bytes as a `Uint8Array` instead of an `ArrayBuffer`. */
+  /** Default `true`. Canonical name. */
+  compress?: boolean;
+  /** Alias of `compress`. */
   compressed?: boolean;
 };
+
+/** Default limits applied by `fromArchive()`. */
+export const DEFAULT_LIMITS: Readonly<{
+  /** 10,000 */
+  maxEntries: number;
+  /** 256 MiB (decompressed bytes) */
+  maxTotalSize: number;
+}>;
 
 export type BrowserFromArchiveOptions = {
-  /** Default `true`. Set `false` if `buffer` is an uncompressed Web Bundle. */
+  /** Default `true`. Set `false` if `buffer` is an uncompressed Web Bundle. Canonical name. */
   compressed?: boolean;
+  /** Alias of `compressed`. */
+  compress?: boolean;
+  /** Reject archives with more entries than this (`ArchiveLimitError`,
+   * `limit: "entries"`). Default `DEFAULT_LIMITS.maxEntries`. */
+  maxEntries?: number;
+  /** Abort once decompression would exceed this many bytes
+   * (`ArchiveLimitError`, `limit: "totalSize"`); also bounds uncompressed
+   * input. Enforced while streaming, so a decompression bomb is never fully
+   * inflated. Default `DEFAULT_LIMITS.maxTotalSize`. */
+  maxTotalSize?: number;
+  /** What to do with an unsafe entry path (`..` segments, absolute, backslash,
+   * NUL/control characters, empty segments, foreign origin, query/fragment,
+   * duplicates after percent-decoding). `"throw"` (default) raises
+   * `InvalidPathError`; `"skip"` silently drops the entry (first duplicate wins). */
+  unsafePaths?: "throw" | "skip";
 };
 
-/**
- * Serializes a file Map to a (by default gzip-compressed) Web Bundle.
- * Returns an `ArrayBuffer` when compressed (the default); returns the raw
- * `Uint8Array` bundle directly when called with `{ compressed: false }`.
- * Same wire format as the Node `.` entry's `toArchive()`, which always
- * returns a `Buffer` -- the two are readable by each other regardless.
- *
- * Declared as overloads (rather than a single `Promise<ArrayBuffer |
- * Uint8Array>` signature) so a literal `{ compressed: false }` narrows the
- * return type precisely instead of forcing every caller to deal with the
- * union.
- */
-export function toArchive(
-  map: Map<string, FileEntry>,
-  options?: { compressed?: true }
-): Promise<ArrayBuffer>;
-export function toArchive(
-  map: Map<string, FileEntry>,
-  options: { compressed: false }
-): Promise<Uint8Array>;
+/** Serializes a file Map to a (by default gzip-compressed) Web Bundle. */
 export function toArchive(
   map: Map<string, FileEntry>,
   options?: BrowserToArchiveOptions
-): Promise<ArrayBuffer | Uint8Array>;
+): Promise<Uint8Array>;
 
 /**
  * Deserializes a (by default gzip-compressed) Web Bundle back into a
- * `Map<string, FileEntry>`. Accepts an `ArrayBuffer` or `Uint8Array` --
- * there is no `Buffer` global in a browser build.
+ * `Map<string, FileEntry>`, safe to call on untrusted bytes. Rejects with
+ * `InvalidPathError`, `ArchiveLimitError` or `InvalidArchiveError` (all
+ * `PackfileError`s with a stable `code`).
  */
 export function fromArchive(
   buffer: ArrayBuffer | Uint8Array,
@@ -74,11 +95,22 @@ export function fromArchive(
 ): Promise<Map<string, FileEntry>>;
 
 /**
+ * Hashes (SHA-256, Web Crypto) a plain `{ path: string | Uint8Array }`
+ * object into a `Map<string, FileEntry>`. Strings are UTF-8 encoded;
+ * `Uint8Array` values are used as-is. Throws `InvalidPathError` for an
+ * unsafe key and `TypeError` for a bad value.
+ */
+export function fromFiles(files: Files): Promise<Map<string, FileEntry>>;
+
+/** Inverse of `fromFiles()`. Values are `Uint8Array` unless `decodeText`. */
+export function toFiles(
+  map: Map<string, FileEntry>,
+  options?: ToFilesOptions
+): Record<string, string | Uint8Array>;
+
+/**
  * Returns a `(input, ctx?) => Promise<Response>` handler that serves files
- * from a `Map`/`LazyFileMap`. `input` may be a path string or a `Request`.
- * The returned function also has itself assigned to `.fetch`. Identical
- * implementation to the `.` entry's `createRouter` (both import
- * `./lib/create-router.mjs`).
+ * from a `Map`/`LazyFileMap`. Identical implementation to the `.` entry's.
  */
 export function createRouter(
   files: FilesMap,

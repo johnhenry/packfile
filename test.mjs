@@ -755,9 +755,10 @@ await test("createBlobPreview — multi-file bundle (HTML + CSS + JS importing J
     assert.equal(preview.resolve("app.js"), preview.registry.resolve("app.js"));
   });
 
-  await t.test("JS blob content is the original, unmodified source (JS import specifiers are not rewritten)", async () => {
+  await t.test("JS blob content has its relative import specifier rewritten to the dependency's blob URL", async () => {
     const appJs = await textOf(preview.resolve("app.js"));
-    assert.equal(appJs, `import { helper } from "./helper.js";\nexport const result = helper();`);
+    assert.equal(appJs, `import { helper } from "${preview.resolve("helper.js")}";\nexport const result = helper();`);
+    assert.equal(await textOf(preview.resolve("helper.js")), `export function helper() { return 42; }`);
   });
 
   await t.test("andbox's registry.resolveSpecifier() still resolves the JS->JS relative import, exposed for advanced use", async () => {
@@ -1247,7 +1248,7 @@ await test("browser.mjs toArchive/fromArchive", async (t) => {
     assert.equal(dec.decode(restored.get("a.txt").data), "A");
   });
 
-  await t.test("unsafe paths (absolute, traversal, NUL) are skipped, same as the Node side", async () => {
+  await t.test("unsafe paths (absolute, traversal, NUL) throw by default; unsafePaths skip matches the Node side", async () => {
     // Built directly via wbn, bypassing toArchive()'s own path handling, to
     // simulate a maliciously/accidentally crafted archive rather than one
     // this package produced itself.
@@ -1258,7 +1259,8 @@ await test("browser.mjs toArchive/fromArchive", async (t) => {
     builder.setPrimaryURL("https://packfile.invalid/");
     const buffer = await compressObject(builder.createBundle());
 
-    const restored = await browserPackfile.fromArchive(buffer);
+    await assert.rejects(() => browserPackfile.fromArchive(buffer), { code: "ERR_PACKFILE_INVALID_PATH", reason: "traversal" });
+    const restored = await browserPackfile.fromArchive(buffer, { unsafePaths: "skip" });
     assert.equal(restored.has("ok.txt"), true);
     assert.equal(restored.has("../escape.txt"), false);
     assert.equal(restored.size, 1);
