@@ -7,6 +7,12 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-12
+
+- Add browser-safe build exporters, Vite and Rollup/Rolldown plugins, and `packfile export` for completed build directories (issue #14; PR reference added before release).
+- Validate build paths and collisions, preserve binary assets, expose SHA-256 inventories, and exclude the destination archive on rebuilds. No wire-format change.
+
+
 ## [0.1.0] - 2026-10-12
 
 Browser-app release (consumed by p2pws for importing/exporting `.wbn` apps).

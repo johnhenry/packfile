@@ -89,7 +89,8 @@ export type ToFilesOptions = {
 export type InvalidPathReason =
   | "empty" | "not-a-string" | "absolute" | "backslash" | "control-character"
   | "empty-segment" | "dot-segment" | "traversal" | "malformed-encoding"
-  | "outside-base" | "query-or-fragment" | "duplicate";
+  | "outside-base" | "query-or-fragment" | "duplicate"
+  | "case-collision" | "file-directory-collision";
 
 export declare class PackfileError extends Error {
   /** Stable machine-readable code, e.g. "ERR_PACKFILE_LIMIT". */

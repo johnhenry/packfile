@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/packfile",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "main": "index.mjs",
   "types": "./types.d.ts",
@@ -40,8 +40,11 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "rolldown": "^1.2.13",
+    "rollup": "^4.64.5",
     "theres-waldo": "^0.0.0",
     "typescript": "^7.0.2",
+    "vite": "^8.3.4",
     "wbn-sign": "^0.3.1"
   },
   "exports": {
@@ -76,6 +79,22 @@
     "./web-bundle": {
       "types": "./lib/web-bundle.d.ts",
       "default": "./lib/web-bundle.mjs"
+    },
+    "./build": {
+      "types": "./lib/build.d.ts",
+      "default": "./lib/build.mjs"
+    },
+    "./build-node": {
+      "types": "./lib/build-node.d.ts",
+      "default": "./lib/build-node.mjs"
+    },
+    "./rollup": {
+      "types": "./lib/rollup.d.ts",
+      "default": "./lib/rollup.mjs"
+    },
+    "./vite": {
+      "types": "./lib/vite.d.ts",
+      "default": "./lib/vite.mjs"
     }
   },
   "files": [
