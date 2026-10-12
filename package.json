@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/packfile",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "main": "index.mjs",
   "types": "./types.d.ts",
@@ -39,6 +39,7 @@
     "wbn": "^0.0.9"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "theres-waldo": "^0.0.0",
     "typescript": "^7.0.2",
     "wbn-sign": "^0.3.1"
@@ -52,22 +53,39 @@
       "types": "./browser.d.ts",
       "default": "./browser.mjs"
     },
-    "./compat": "./compat.mjs",
-    "./cache": "./cache.mjs",
-    "./hash": "./lib/hash.mjs",
-    "./compression": "./lib/compression.mjs",
+    "./compat": {
+      "types": "./compat.d.ts",
+      "default": "./compat.mjs"
+    },
+    "./cache": {
+      "types": "./cache.d.ts",
+      "default": "./cache.mjs"
+    },
+    "./hash": {
+      "types": "./lib/hash.d.ts",
+      "default": "./lib/hash.mjs"
+    },
+    "./compression": {
+      "types": "./lib/compression.d.ts",
+      "default": "./lib/compression.mjs"
+    },
     "./blob-preview": {
       "types": "./blob-preview.d.ts",
       "default": "./lib/blob-preview.mjs"
     },
-    "./web-bundle": "./lib/web-bundle.mjs"
+    "./web-bundle": {
+      "types": "./lib/web-bundle.d.ts",
+      "default": "./lib/web-bundle.mjs"
+    }
   },
   "files": [
     "index.mjs",
     "browser.mjs",
     "browser.d.ts",
     "compat.mjs",
+    "compat.d.ts",
     "cache.mjs",
+    "cache.d.ts",
     "packfile.mjs",
     "lib/",
     "blob-preview.d.ts",

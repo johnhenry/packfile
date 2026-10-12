@@ -755,9 +755,10 @@ await test("createBlobPreview — multi-file bundle (HTML + CSS + JS importing J
     assert.equal(preview.resolve("app.js"), preview.registry.resolve("app.js"));
   });
 
-  await t.test("JS blob content is the original, unmodified source (JS import specifiers are not rewritten)", async () => {
+  await t.test("JS blob content has its relative import specifier rewritten to the dependency's blob URL", async () => {
     const appJs = await textOf(preview.resolve("app.js"));
-    assert.equal(appJs, `import { helper } from "./helper.js";\nexport const result = helper();`);
+    assert.equal(appJs, `import { helper } from "${preview.resolve("helper.js")}";\nexport const result = helper();`);
+    assert.equal(await textOf(preview.resolve("helper.js")), `export function helper() { return 42; }`);
   });
 
   await t.test("andbox's registry.resolveSpecifier() still resolves the JS->JS relative import, exposed for advanced use", async () => {

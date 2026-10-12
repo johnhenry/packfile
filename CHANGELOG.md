@@ -7,6 +7,51 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-12
+
+Browser-app release (consumed by p2pws for importing/exporting `.wbn` apps).
+Refs [#7](https://github.com/johnhenry/packfile/issues/7).
+
+### Added
+
+- **`fromFiles(files)` / `toFiles(map, { decodeText })`** in `.` and `./browser`:
+  adapters between `{ [path]: string | Uint8Array }` and `Map<path, {data,size,hash}>`
+  (Web Crypto SHA-256, identical to `hashBuffer()`).
+- **Hardened `fromArchive()` in `./browser`** for untrusted bundles: `maxEntries`
+  (10,000) and `maxTotalSize` (256 MiB, enforced while streaming the gunzip so
+  bombs are cut off), `unsafePaths: "throw" | "skip"`, and typed errors
+  `PackfileError` / `InvalidPathError` / `ArchiveLimitError` /
+  `InvalidArchiveError` (exported from both entries) with stable `code`s.
+  `DEFAULT_LIMITS` exported.
+- **Types for every subpath**: `./compat`, `./cache`, `./hash`, `./compression`,
+  `./web-bundle` (closes #7), plus the new APIs. The typecheck fixture now
+  runs with `skipLibCheck: false`, which also exposed and fixed the existing
+  `.d.ts` files importing `./types` without a file extension (unresolvable
+  under NodeNext, previously masked).
+- **`createBlobPreview`: relative ES-module import rewriting.** Static
+  `import`/`export ... from`, side-effect imports and string-literal
+  `import()` in JS files now point at dependency blob URLs, in module-graph
+  order, via `es-module-lexer`'s pure-JS build. Cycles are reported through
+  `onUnresolvedReference` and left unrewritten; new reason `"unparseable"`.
+
+### Changed
+
+- **Behavior (browser): `fromArchive()` now throws `InvalidPathError` on an
+  unsafe entry by default** instead of silently skipping it; pass
+  `{ unsafePaths: "skip" }` for the old behavior.
+- **Behavior (browser): `toArchive()` always resolves to a `Uint8Array`**
+  (was an `ArrayBuffer` when compressing).
+- Both entries accept `compress` and `compressed` in `toArchive` and
+  `fromArchive` (canonical: `compress` for `toArchive`, `compressed` for
+  `fromArchive`); contradictory values throw.
+- Archive path validation is one shared module (`lib/path-safety.mjs`) for the
+  Node and browser readers; it percent-decodes before checking (`%2e%2e`,
+  `%5c`, `%00`), and no longer rejects harmless names like `a..b`.
+- `toArchive()` percent-encodes each path segment, so names containing `#`,
+  `?`, `%` or spaces round-trip exactly.
+- `createBlobPreview`: JS blobs now contain rewritten source (previously the
+  original, unmodified text).
+
 ### Fixed
 
 - **CI never actually ran `typecheck`.** The #5 fix added a `typecheck`

@@ -123,7 +123,7 @@ const entry = await files.get('index.html'); // reads from disk
 
 ### `toArchive(map, options?)`
 
-Serializes a file Map to a compressed archive buffer -- `gzip(application/webbundle)`, via the real `wbn` package.
+Serializes a file Map to a compressed archive buffer -- `gzip(application/webbundle)`, via the real `wbn` package. Options: `compress` (default `true`; `compressed` is accepted as an alias), `compressionLevel`. Resolves to a `Buffer`.
 
 ```js
 const buffer = await toArchive(files);
@@ -131,7 +131,17 @@ const buffer = await toArchive(files);
 
 ### `fromArchive(buffer, options?)`
 
-Deserializes an archive back to a file Map. Validates paths — entries with path traversal (`../`) or absolute paths are rejected.
+Deserializes an archive back to a file Map. Options: `compressed` (default `true`; `compress` is accepted as an alias). Entries with an unsafe path (decoded `..`/`.`/empty segments, absolute, backslash, NUL/control characters, foreign origin, query/fragment, duplicates) are **skipped**. This Node reader is meant for local, trusted archives and applies **no size limits**; for untrusted input use the hardened `./browser` reader, which works in Node too.
+
+### `fromFiles(files)` / `toFiles(map, options?)`
+
+Adapters between the plain `{ [relativePosixPath]: string | Uint8Array }` object an app usually holds and packfile's `Map<path, { data, size, hash }>`. `fromFiles` is async (SHA-256 via Web Crypto, so hashes equal `hashBuffer()`'s), UTF-8-encodes strings, uses `Uint8Array` values as-is, and throws `InvalidPathError` for an unsafe key or `TypeError` for a bad value. `toFiles` returns bytes by default; `{ decodeText: true }` (or a `(path) => boolean`) returns text-typed entries (text/*, JSON, JavaScript, XML/SVG, valid UTF-8 only) as strings. Both are exported from `.` and `./browser`.
+
+```js
+const map = await fromFiles({ 'index.html': '<h1>hi</h1>', 'logo.png': pngBytes });
+const archive = await toArchive(map);
+const files = toFiles(await fromArchive(archive), { decodeText: true });
+```
 
 ```js
 const files = await fromArchive(buffer);
@@ -194,16 +204,37 @@ Uses SHA-256 hashing (same as file ETags) for consistent cache keys.
 ## Browser Usage
 
 ```js
-import { fromArchive, toArchive, createRouter } from '@johnhenry/packfile/browser';
+import { fromFiles, toFiles, fromArchive, toArchive, createRouter } from '@johnhenry/packfile/browser';
 ```
 
-The browser bundle provides `fromArchive`, `toArchive`, and `createRouter`, using the `wbn` package directly (no Node APIs required) and Web Crypto for hashing -- same wire format as the Node entrypoint, so an archive built by one is directly readable by the other. **`toArchive()` here returns an `ArrayBuffer`, not the `Buffer` the Node `.` entry's `toArchive()` returns** (or a `Uint8Array` when called with `{ compressed: false }`) -- there is no `Buffer` in a browser. Types for this subpath are declared in `browser.d.ts` (see `./browser`'s `types` condition in `package.json`).
+The browser entry provides `fromFiles`, `toFiles`, `fromArchive`, `toArchive`, `createRouter` and the error classes, using the `wbn` package directly (no Node APIs) and Web Crypto/Web Streams -- same wire format as the Node entry, so an archive built by one is readable by the other. Types are in `browser.d.ts`.
 
 ```js
 const archive = await fetch('/app.wbn').then(r => r.arrayBuffer());
-const files = await fromArchive(archive);
+const files = await fromArchive(archive);        // safe on untrusted bytes
 const router = createRouter(files);
 ```
+
+**Differences from the Node entry**
+
+- `toArchive()` resolves to a plain `Uint8Array`. The Node entry resolves to a `Buffer` (a `Uint8Array` subclass), so code typed against `Uint8Array` works with both. *(Before 0.1.0 the browser entry returned an `ArrayBuffer` when compressing; wrap with `.buffer` or `slice` if you need one.)* There is no `compressionLevel` in the browser.
+- Option names are aligned: `compress` is canonical for `toArchive`, `compressed` for `fromArchive`, and **both entries accept either spelling in both functions**. Passing both with different values throws a `TypeError`.
+- `fromArchive()` is **hardened for untrusted input** (below); the Node one is not.
+
+### Importing untrusted archives
+
+`fromArchive()` from `./browser` is designed for `.wbn` files from strangers:
+
+| Option | Default | Effect |
+|--------|---------|--------|
+| `maxEntries` | `10_000` | more entries -> `ArchiveLimitError` (`limit: "entries"`) |
+| `maxTotalSize` | `256 MiB` | decompression is streamed and aborted once output exceeds this -> `ArchiveLimitError` (`limit: "totalSize"`); a gzip bomb is never fully inflated. Also bounds uncompressed input. |
+| `unsafePaths` | `"throw"` | `"throw"` raises `InvalidPathError`; `"skip"` drops the entry (first duplicate wins) |
+| `compressed` | `true` | `false` if the bytes are a raw Web Bundle |
+
+Paths are validated after percent-decoding, so `%2e%2e`, `%5c` and `%00` cannot slip through: `..`/`.`/empty segments, absolute paths, backslashes, NUL/control characters, query/fragment, foreign origins and entries that collide after decoding are all rejected (`InvalidPathError.reason` says which). Input that is not a gzip stream or Web Bundle raises `InvalidArchiveError`. All errors extend `PackfileError` and carry a stable `code` (`ERR_PACKFILE_INVALID_PATH`, `ERR_PACKFILE_LIMIT`, `ERR_PACKFILE_INVALID_ARCHIVE`); `DEFAULT_LIMITS` is exported.
+
+This hardens *reading*. Whatever you then do with the files (rendering them, `createBlobPreview`) is still on you -- see "What is still yours".
 
 ## Blob Preview (host packaged content in a browser tab/iframe, no server)
 
@@ -221,9 +252,15 @@ same input `createRouter()` takes) and you just want to point an
 It mints one `blob:` URL per file and rewrites HTML (`href`, `src`,
 `srcset`, `poster`, `formaction`) and CSS (`url(...)`, `@import`)
 references so they resolve to the right file's blob URL instead of
-404ing. JS module resolution (`import`/`import()` between `.js`/`.mjs`
-files) is delegated to the sibling `@johnhenry/andbox` package's
-`createVirtualModuleRegistry()` rather than reimplemented here.
+404ing. In `.js`/`.mjs`/`.cjs` files, relative ES-module specifiers --
+static `import ... from './x.js'`, `export ... from`, `export * from`,
+side-effect `import './x.js'`, and `import('./x.js')` with a string literal
+-- are rewritten to the dependency's blob URL, dependency-first. Specifiers
+are found with [`es-module-lexer`](https://github.com/guybedford/es-module-lexer)
+(its pure-JS build: no WASM, no Node APIs, so it is browser-safe), a real
+lexer, so imports inside comments or strings are left alone. The JS blobs
+are minted through the sibling `@johnhenry/andbox` package's
+`createVirtualModuleRegistry()`, exposed as `preview.registry`.
 
 ```js
 import { fromDirectory } from '@johnhenry/packfile';
@@ -293,14 +330,17 @@ for free:
   for anyone who needs real isolation or full HTTP-shaped semantics.
 - Inline `<script>`/`<style>` block *contents* are left untouched (only
   attribute references and standalone `.css`/`.js` files are rewritten).
-- A `<script src="...">` pointing at a `.js` file loads that file's
-  **original, unmodified** source — nested relative `import`s inside it
-  are not rewritten, because `blob:` URLs can't be used as a relative-
-  resolution base at all (confirmed directly: `new URL("./x.js", blobUrl)`
-  throws `Invalid URL`), so a raw multi-file ESM graph loaded this way
-  won't resolve its own imports in a real browser. `registry.resolveSpecifier()`
-  is exposed for callers who want to do their own resolution; otherwise,
-  pre-bundle multi-file JS into one file before packaging with packfile.
+- **Module cycles cannot fully load.** A blob's bytes are immutable, so the
+  edge that closes an import cycle (`a.js` -> `b.js` -> `a.js`, or a module
+  importing itself) is reported via `onUnresolvedReference` (`reason:
+  "cycle"`) and left as the original relative text, which will not resolve
+  from a `blob:` URL. Everything else in the graph is rewritten.
+- Only string-literal **relative** specifiers (`./`, `../`) in JS are
+  rewritten. Bare specifiers, absolute URLs, `/root-relative` specifiers,
+  template-literal or computed `import(expr)` and `new URL('./x', import.meta.url)`
+  are untouched (use an import map). A `?query`/`#hash` on a relative JS
+  specifier is dropped. JS the lexer cannot parse is left as-is and reported
+  (`reason: "unparseable"`).
 
 ## Web Bundle / Isolated Web App primitives (`./web-bundle`)
 
@@ -397,7 +437,7 @@ import { compressObject, deCompressObject } from '@johnhenry/packfile/compressio
 | Export | File | Description |
 |--------|------|-------------|
 | `.` | `index.mjs` | Full API: `fromDirectory`, `fromArchive`, `toArchive`, `createRouter`, `hashBuffer`, etc. |
-| `./browser` | `browser.mjs` | Browser-compatible: `fromArchive`, `toArchive`, `createRouter` |
+| `./browser` | `browser.mjs` | Browser-compatible: hardened `fromArchive`, `toArchive`, `fromFiles`, `toFiles`, `createRouter`, error classes |
 | `./cache` | `cache.mjs` | `withCache` — HTTP caching middleware |
 | `./hash` | `lib/hash.mjs` | `hashBuffer`, `hashStream` |
 | `./compression` | `lib/compression.mjs` | `compressObject`, `deCompressObject` |
@@ -405,14 +445,7 @@ import { compressObject, deCompressObject } from '@johnhenry/packfile/compressio
 | `./blob-preview` | `lib/blob-preview.mjs` | `createBlobPreview` — host a `FilesMap` client-side via `blob:` URLs, no server |
 | `./web-bundle` | `lib/web-bundle.mjs` | Lower-level Web Bundle primitives: `toWebBundle`, `fromWebBundle`, `createWebBundleRouter` — the engine `toArchive`/`fromArchive` are built on, with a real `baseURL`/headers/IWA-signing exposed |
 
-TypeScript types: `.`, `./browser`, and `./blob-preview` each have a `types`
-condition and a real `.d.ts` file (`types.d.ts`, `browser.d.ts`,
-`blob-preview.d.ts`). The remaining subpaths (`./compat`, `./cache`,
-`./hash`, `./compression`, `./web-bundle`) do not yet -- importing from one
-of those in TypeScript will type-check as `any`, not a compile error, but
-also not real type safety. (`./browser` and `./blob-preview` were fixed in
-[#5](https://github.com/johnhenry/packfile/issues/5); the others are open,
-unfixed instances of the same gap.)
+TypeScript types: every subpath has a `types` condition and a real `.d.ts` file (checked in CI with `skipLibCheck: false` against the published package name).
 
 ## Security model
 
@@ -422,7 +455,8 @@ unfixed instances of the same gap.)
   (and `fromWebBundle()`, which it's built on) rejects any entry whose path
   would escape the archive's own base -- a leading slash or backslash, a
   `..` segment anywhere in the path, a NUL byte, or an empty/`.` path -- via
-  `isSafePath()` in `lib/web-bundle.mjs`. A rejected entry is silently
+  `checkPath()`/`urlToPath()` in `lib/path-safety.mjs`, shared by the Node
+  and browser readers, after percent-decoding. On the Node reader a rejected entry is silently
   skipped rather than written, so an archive built to escape its extraction
   root (a "zip-slip"-shaped attack) cannot use `fromArchive()`/
   `decompileDirectory()` to do it.
@@ -431,6 +465,11 @@ unfixed instances of the same gap.)
   built by `fromDirectory()`/`fromArchive()`/your own code -- there is no
   filesystem access at request time, so a crafted request path cannot read
   anything not already present in that map.
+
+- **The `./browser` `fromArchive()` is safe on hostile bytes**: bounded
+  entry count and decompressed size (streamed, so bombs are cut off early),
+  strict path validation that throws typed errors by default, and no raw
+  lower-level exceptions. The Node `fromArchive()` has no size limits.
 
 **What is still yours:**
 

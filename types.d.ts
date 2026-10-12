@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import {
   FileEntry,
   FilesMap,
@@ -10,7 +11,9 @@ import {
   RouteContext,
   FallbackHandler,
   CompileOptions,
-} from "./types";
+  Files,
+  ToFilesOptions,
+} from "./types.js";
 
 export {
   FileEntry,
@@ -24,7 +27,10 @@ export {
   RouteContext,
   FallbackHandler,
   CompileOptions,
+  Files,
+  ToFilesOptions,
 };
+export { PackfileError, InvalidPathError, ArchiveLimitError, InvalidArchiveError, InvalidPathReason } from "./types.js";
 
 // Note: `types.d.ts` describes the main `.` entry point (`index.mjs`).
 // `withCache` (from the `@johnhenry/packfile/cache` subpath) is documented in the README
@@ -42,13 +48,27 @@ export function fromDirectoryLazy(
   options?: FromDirectoryLazyOptions
 ): Promise<FilesMap>;
 
-/** Serializes a file Map to a (by default gzip-compressed) CBOR archive buffer. */
+/**
+ * Hashes (SHA-256, Web Crypto) a plain `{ path: string | Uint8Array }`
+ * object into a `FilesMap`-compatible `Map`. Strings are UTF-8 encoded;
+ * `Uint8Array` values are used as-is (not copied). Throws `InvalidPathError`
+ * for an unsafe key and `TypeError` for a bad value.
+ */
+export function fromFiles(files: Files): Promise<Map<string, FileEntry>>;
+
+/** Inverse of `fromFiles()`. Values are `Uint8Array` unless `decodeText`. */
+export function toFiles(
+  map: Map<string, FileEntry>,
+  options?: ToFilesOptions
+): Record<string, string | Uint8Array>;
+
+/** Serializes a file Map to a (by default gzip-compressed) Web Bundle buffer. */
 export function toArchive(
   map: Map<string, FileEntry>,
   options?: ToArchiveOptions
 ): Promise<Buffer>;
 
-/** Deserializes a CBOR archive back into a `Map<string, FileEntry>`. */
+/** Deserializes a Web Bundle archive back into a `Map<string, FileEntry>`. */
 export function fromArchive(
   buffer: Buffer | ArrayBuffer | Uint8Array,
   options?: FromArchiveOptions
