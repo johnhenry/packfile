@@ -9,7 +9,7 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
 
 ## [0.2.0] - 2026-10-12
 
-- Add browser-safe build exporters, Vite and Rollup/Rolldown plugins, and `packfile export` for completed build directories (issue #14; PR reference added before release).
+- Add browser-safe build exporters, Vite and Rollup/Rolldown plugins, and `packfile export` for completed build directories ([#14](https://github.com/johnhenry/packfile/issues/14), commit [0f96410](https://github.com/johnhenry/packfile/commit/0f96410faf92749d5ae56f3d29b3caa416289fef)).
 - Validate build paths and collisions, preserve binary assets, expose SHA-256 inventories, and exclude the destination archive on rebuilds. No wire-format change.
 
 
