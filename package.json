@@ -23,7 +23,7 @@
     "node": ">=26.0.0"
   },
   "scripts": {
-    "test": "node --test test.mjs",
+    "test": "node --test test.mjs test/*.test.mjs",
     "typecheck": "tsc --project test/types-fixture/tsconfig.json",
     "demo:compile": "node demo/compile.mjs",
     "demo:server": "node demo/server.mjs",
@@ -35,6 +35,7 @@
   "description": "Content-addressed static-file archiver and in-memory HTTP router",
   "dependencies": {
     "@johnhenry/andbox": "^0.0.2",
+    "es-module-lexer": "^3.0.3",
     "wbn": "^0.0.9"
   },
   "devDependencies": {
