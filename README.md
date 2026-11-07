@@ -621,6 +621,13 @@ another's router.
   surface needed. See `examples/08-mount-packfile` in the servable repo for
   a real, running mount (`Route path="/*"` inside a `Group prefix="/mem"`,
   forwarding the wildcard-captured path straight to the router).
+- **[`@johnhenry/prism`](https://github.com/johnhenry/prism)** -- a live
+  HTTP request inspector/proxy that uses `fromDirectory()`/`fromArchive()`/
+  `toArchive()`/`createRouter()` for its own dashboard's static assets and
+  for a user-facing custom-route feature (serving a directory or an
+  uploaded archive at an arbitrary path). This package is the direct
+  successor of `lemem`, prism's own original dependency for this, ported
+  and renamed before prism itself was.
 
 ## Internal formats
 
