@@ -1,0 +1,24 @@
+{
+  "generator": "@johnhenry/sitefile@0.0.0",
+  "baseURL": "https://site.example/",
+  "bundleSha256": "eeb0a1de43f5fd69e1f32ea258898f6ac81357bc6f42e7d384b840a0bb59c929",
+  "bundleSize": 951,
+  "files": {
+    "index.html": {
+      "size": 100,
+      "sha256": "39c65ff0247ea77f0a0561a3ab5dd5329d3beac5bf0693dc0e7ca33c7c770c3f"
+    },
+    "style.css": {
+      "size": 22,
+      "sha256": "97e2e94903cc329307564d464c6b7d189fa7a42357b64ddc40319c567470c38d"
+    },
+    "bin/bytes.bin": {
+      "size": 256,
+      "sha256": "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880"
+    },
+    "docs/ünï/page.html": {
+      "size": 62,
+      "sha256": "5e1240847eced2d3e88af645c2e8f0deb5f0c3f65dd91f503b7199cafd80f7ab"
+    }
+  }
+}
