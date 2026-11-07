@@ -621,6 +621,17 @@ another's router.
   surface needed. See `examples/08-mount-packfile` in the servable repo for
   a real, running mount (`Route path="/*"` inside a `Group prefix="/mem"`,
   forwarding the wildcard-captured path straight to the router).
+- **[`@johnhenry/sitefile`](https://github.com/johnhenry/sitefile)** --
+  Sitefile's `EXPORT / AS wbn BASE <url>` writes a plain (not gzipped) b2
+  Web Bundle. `fromWebBundle(buffer, { baseURL })` from `./web-bundle` reads
+  it back into exactly the exported files, and `createRouter()` serves it.
+  Exported with `BASE https://packfile.invalid/`, the same bundle is what
+  `fromArchive(buffer, { compressed: false })` reads, and gzipping it gives
+  this package's archive format. Sitefile has no runtime dependency on
+  packfile; its `test/packfile-interop.test.ts` (packfile as a
+  devDependency) checks all three. The other direction, Sitefile importing
+  a `toArchive()` archive with `AS tree`, isn't supported yet
+  (johnhenry/sitefile#141).
 
 ## Internal formats
 
