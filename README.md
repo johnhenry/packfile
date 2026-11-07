@@ -234,7 +234,22 @@ const buffer = await toArchive(files);
 
 ### `fromArchive(buffer, options?)`
 
-Deserializes an archive back to a file Map. Options: `compressed` (default `true`; `compress` is accepted as an alias). Entries with an unsafe path (decoded `..`/`.`/empty segments, absolute, backslash, NUL/control characters, foreign origin, query/fragment, duplicates) are **skipped**. This Node reader is meant for local, trusted archives and applies **no size limits**; for untrusted input use the hardened `./browser` reader, which works in Node too.
+Deserializes an archive back to a file Map. Options:
+
+- `compressed` (default `true`; `compress` is accepted as an alias).
+- `baseURL`: the absolute URL each exchange URL is made relative to. By default it is the bundle's primary URL's root (origin + `/`), or `https://packfile.invalid/` (the internal base `toArchive()` writes, also as its primary URL) when the bundle has none. So archives from `toArchive()` and a gzip(Web Bundle) built for a real site with a primary URL both read back without it. Pass it when a bundle's entries live somewhere other than its primary URL's origin, or under a sub-path (`https://example.com/app/` gives keys relative to `app/`).
+- `onSkip({ url, reason })`: called once for each entry that is left out. Throw from it to abort instead.
+
+Entries outside `baseURL` (`reason: "outside-base"`) or with an unsafe path (decoded `..`/`.`/empty segments, absolute, backslash, NUL/control characters, query/fragment, duplicates) are **skipped**. Without `onSkip` nothing reports them, so an archive whose base doesn't match reads back as an empty map. This Node reader is meant for local, trusted archives and applies **no size limits**; for untrusted input use the hardened `./browser` reader, which works in Node too.
+
+```js
+const files = await fromArchive(buffer, {
+  baseURL: 'https://example.com/',
+  onSkip: ({ url, reason }) => console.warn(`skipped ${url}: ${reason}`),
+});
+```
+
+`decompileDirectory()` and the CLI's `decompress`/`serve` use the defaults (no `baseURL`, no `onSkip`).
 
 ### `fromFiles(files)` / `toFiles(map, options?)`
 
@@ -333,6 +348,8 @@ const router = createRouter(files);
 | `maxEntries` | `10_000` | more entries -> `ArchiveLimitError` (`limit: "entries"`) |
 | `maxTotalSize` | `256 MiB` | decompression is streamed and aborted once output exceeds this -> `ArchiveLimitError` (`limit: "totalSize"`); a gzip bomb is never fully inflated. Also bounds uncompressed input. |
 | `unsafePaths` | `"throw"` | `"throw"` raises `InvalidPathError`; `"skip"` drops the entry (first duplicate wins) |
+| `onSkip` | none | with `"skip"`, called as `onSkip({ url, reason })` for each dropped entry; throw from it to abort |
+| `baseURL` | primary URL's root, else `https://packfile.invalid/` | the base exchange URLs are made relative to; anything outside it is unsafe (`reason: "outside-base"`). Same default as the Node entry. |
 | `compressed` | `true` | `false` if the bytes are a raw Web Bundle |
 
 Paths are validated after percent-decoding, so `%2e%2e`, `%5c` and `%00` cannot slip through: `..`/`.`/empty segments, absolute paths, backslashes, NUL/control characters, query/fragment, foreign origins and entries that collide after decoding are all rejected (`InvalidPathError.reason` says which). Input that is not a gzip stream or Web Bundle raises `InvalidArchiveError`. All errors extend `PackfileError` and carry a stable `code` (`ERR_PACKFILE_INVALID_PATH`, `ERR_PACKFILE_LIMIT`, `ERR_PACKFILE_INVALID_ARCHIVE`); `DEFAULT_LIMITS` is exported.
@@ -450,8 +467,9 @@ for free:
 `toArchive()`/`fromArchive()` at the main `.` entrypoint (and `createRouter()`)
 already use `application/webbundle` under the hood -- see "Node.js API"
 above. This subpath is for callers who want the lower-level control those
-two deliberately hide: a real, resolvable `baseURL` (rather than the fixed
-internal one `toArchive`/`fromArchive` use), custom per-file `headers()`,
+two deliberately hide: a real, resolvable `baseURL` when *writing* (rather
+than the fixed internal one `toArchive` uses; `fromArchive` can *read* a
+bundle with any base, see its `baseURL` option), custom per-file `headers()`,
 signing via `wbn-sign` for actual Isolated Web App deployment, and a router
 that serves a bundle's own real headers verbatim.
 
@@ -465,7 +483,8 @@ const bundle = toWebBundle(files, { baseURL: 'https://example.com/' });
 // Bundle class, or `<script type=webbundle>` in a supporting browser.
 
 const recovered = fromWebBundle(bundle, { baseURL: 'https://example.com/' });
-// back to a FilesMap, e.g. to hand to a different consumer.
+// back to a FilesMap, e.g. to hand to a different consumer. Entries outside
+// baseURL are skipped; pass onSkip({ url, reason }) to see them.
 ```
 
 **Serving a bundle**: `createRouter(fromWebBundle(bundle, { baseURL }))`
@@ -563,8 +582,8 @@ TypeScript types: every subpath has a `types` condition and a real `.d.ts` file 
   would escape the archive's own base -- a leading slash or backslash, a
   `..` segment anywhere in the path, a NUL byte, or an empty/`.` path -- via
   `checkPath()`/`urlToPath()` in `lib/path-safety.mjs`, shared by the Node
-  and browser readers, after percent-decoding. On the Node reader a rejected entry is silently
-  skipped rather than written, so an archive built to escape its extraction
+  and browser readers, after percent-decoding. On the Node reader a rejected entry is
+  skipped rather than written (reported through `onSkip` if you pass one), so an archive built to escape its extraction
   root (a "zip-slip"-shaped attack) cannot use `fromArchive()`/
   `decompileDirectory()` to do it.
 - **`createRouter()` never serves outside the file map it was given.** It

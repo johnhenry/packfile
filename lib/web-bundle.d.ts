@@ -1,4 +1,4 @@
-import { FileEntry } from "../types.js";
+import { FileEntry, SkippedEntry } from "../types.js";
 
 export type ToWebBundleOptions = {
   /** Absolute URL each relative path is resolved against (required). */
@@ -15,6 +15,8 @@ export type FromWebBundleOptions = {
   /** If given, exchange URLs are mapped back to `baseURL`-relative paths and
    * unsafe or foreign entries are skipped. Without it, keys are full URLs. */
   baseURL?: string;
+  /** With `baseURL`, called once per skipped entry. Throw from it to abort. */
+  onSkip?: (skipped: SkippedEntry) => void;
 };
 
 export type WebBundleRouterOptions = {

@@ -21,6 +21,11 @@ async function check(): Promise<void> {
   const back: Map<string, FileEntry> = fromWebBundle(wb, { baseURL: "https://x.example/" });
   const archive: Buffer = await toArchive(back, { compressed: false });
   await fromArchive(archive, { compress: false });
+  await fromArchive(archive, {
+    baseURL: "https://example.com/",
+    onSkip: ({ url, reason }) => console.warn(url, reason),
+  });
+  fromWebBundle(wb, { baseURL: "https://x.example/", onSkip: (s) => void s.reason });
   const files: Record<string, string | Uint8Array> = toFiles(map);
   void [res, h, raw, files, createWebBundleRouter, createBlobPreview, InvalidPathError];
   const preview = await createBlobPreview(map, { onUnresolvedReference: (i) => i.reason });

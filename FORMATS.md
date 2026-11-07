@@ -117,16 +117,28 @@ wrapper around `lib/web-bundle.mjs`'s `toWebBundle()` with the fixed
 after building the bundle, default on, unchanged from before.
 
 **Consumed by:** `lib/from-archive.mjs`'s `fromArchive(buffer, opts)`, a
-thin wrapper around `fromWebBundle()`. Decompresses (if `compressed: true`,
-the default) via `lib/compression.mjs`'s `deCompressObject`, then parses
-via `wbn.Bundle` and strips `ARCHIVE_BASE_URL` back off each exchange's
-URL to recover the relative path. Every resulting path is still run through
-an `isSafePath()` check (now living inside `fromWebBundle()` itself, applied
-whenever a `baseURL` is given; since 0.1.0 it is the shared `urlToPath()` in
-`lib/path-safety.mjs`, which percent-decodes first and rejects `..`/`.`/empty
-segments, absolute paths, backslashes, control characters, query/fragment and
-foreign origins) -- and unsafe entries are **silently dropped** rather than throwing, same behavior as
-before (see the CHANGELOG's "Archive path-validation gap" entry for why).
+thin wrapper around the same bundle-to-`FilesMap` loop `fromWebBundle()`
+uses (`lib/bundle-to-files.mjs`). Decompresses (if `compressed: true`, the
+default) via `lib/compression.mjs`'s `deCompressObject`, then parses via
+`wbn.Bundle` and strips a base back off each exchange's URL to recover the
+relative path. Since #18 that base is chosen by `resolveArchiveBase()`
+(`lib/path-safety.mjs`, shared with the browser reader): an explicit
+`opts.baseURL`; else the bundle's primary URL's root (`new URL("/",
+primaryURL)`, i.e. origin + "/"); else `ARCHIVE_BASE_URL`. `toArchive()`
+(Node and browser) writes `ARCHIVE_BASE_URL` as the primary URL, so its
+archives always resolve to the same base as before; the derivation only
+changes the result for bundles written by something else for a real origin
+(e.g. Sitefile's `EXPORT ... AS wbn BASE https://example.com/`), which
+previously read back as an empty map. The *writing* side is unchanged:
+`toArchive()` still has no `baseURL` option (use `./web-bundle`'s
+`toWebBundle()` for that). Every resulting path is run through the shared
+`urlToPath()` in `lib/path-safety.mjs`, which percent-decodes first and
+rejects `..`/`.`/empty segments, absolute paths, backslashes, control
+characters, query/fragment and URLs outside the base -- and unsafe entries
+are **dropped** rather than throwing, same behavior as before (see the
+CHANGELOG's "Archive path-validation gap" entry for why). `opts.onSkip({
+url, reason })` is called for each dropped entry, so callers can log it or
+throw; without it the drop is silent.
 
 **The hash-trust gap that existed here is now closed as a side effect, not
 a deliberate fix.** The old format's `fromArchive()` read `hash` straight

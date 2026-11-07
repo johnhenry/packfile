@@ -32,6 +32,11 @@ async function assertBrowserTypes(): Promise<void> {
   });
   await fromArchive(uncompressed, { compress: false });
   await fromArchive(new ArrayBuffer(0));
+  await fromArchive(compressed, {
+    baseURL: "https://example.com/",
+    unsafePaths: "skip",
+    onSkip: ({ url, reason }) => console.warn(url, reason),
+  });
 
   const back: Record<string, string | Uint8Array> = toFiles(roundTripped, { decodeText: true });
   void back;

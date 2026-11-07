@@ -40,14 +40,17 @@ CI (`.github/workflows/ci.yml`) runs `npm test`; match it locally.
 - **Path safety for decoded archive entries lives in one place:
   `lib/path-safety.mjs`** (`checkPath()`/`urlToPath()`; the browser reader is `lib/safe-archive.mjs`). A relative key that would
   escape the `baseURL` (leading slash, `..`, a NUL byte, empty/`.`) is
-  silently skipped by `fromWebBundle()`, not an error -- don't duplicate a
+  skipped by `fromWebBundle()`, not an error (reported through `onSkip` when given) -- don't duplicate a
   second, differently-shaped check elsewhere; extend this one instead.
-- **`toWebBundle`/`fromWebBundle`'s `baseURL` is internal-only for the
-  `toArchive`/`fromArchive` entrypoints** (`ARCHIVE_BASE_URL`, a fixed
-  `https://packfile.invalid/`) -- a real, resolvable `baseURL` is only
-  needed at the `./web-bundle` subpath, for actual IWA signing. Don't wire
-  a caller-supplied `baseURL` into `toArchive()`/`fromArchive()` without
-  re-reading `FORMATS.md` §2 first.
+- **`toArchive()` always writes the fixed internal base**
+  (`ARCHIVE_BASE_URL`, `https://packfile.invalid/`, also its primary URL);
+  a real, resolvable base for *writing* is only exposed at the
+  `./web-bundle` subpath, for actual IWA signing. Don't wire a
+  caller-supplied `baseURL` into `toArchive()` without re-reading
+  `FORMATS.md` §2 first. *Reading* is different since #18: `fromArchive()`
+  (Node and browser) takes `baseURL`, defaulting to the bundle's primary
+  URL's root, else `ARCHIVE_BASE_URL` (`resolveArchiveBase()` in
+  `lib/path-safety.mjs`), and `onSkip` to report dropped entries.
 - **`createBlobPreview()` is for trusted content only**, not a general
   arbitrary/untrusted-content solution -- see README's "What this does and
   does not solve" and `## Security model`. Don't extend its promises
