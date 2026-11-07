@@ -30,11 +30,29 @@ export type ToArchiveOptions = {
   compressionLevel?: number;
 };
 
+/** An archive entry a reader left out (see `onSkip`). */
+export type SkippedEntry = {
+  /** The exchange URL as stored in the bundle. */
+  url: string;
+  /** Why it was left out, e.g. `"outside-base"` (a foreign origin or a
+   * `baseURL` mismatch), `"traversal"`, `"duplicate"`. */
+  reason: InvalidPathReason;
+};
+
 export type FromArchiveOptions = {
   /** Default `true`. Set `false` for an uncompressed Web Bundle. Canonical name. */
   compressed?: boolean;
   /** Alias of `compressed`. */
   compress?: boolean;
+  /** Absolute URL each exchange URL is made relative to. Default: the
+   * bundle's primary URL's root (origin + "/"), or
+   * `"https://packfile.invalid/"` (what `toArchive()` writes) when the bundle
+   * has none. Pass it for a bundle built for a real site, e.g.
+   * `"https://example.com/"`. Entries outside it are skipped. */
+  baseURL?: string;
+  /** Called once per skipped entry (outside `baseURL`, unsafe path, or a
+   * duplicate after percent-decoding). Throw from it to abort the read. */
+  onSkip?: (skipped: SkippedEntry) => void;
 };
 
 export type RouteContext = unknown;
