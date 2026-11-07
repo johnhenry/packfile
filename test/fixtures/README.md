@@ -9,6 +9,9 @@ A Web Bundle written by the **published** `@johnhenry/sitefile@0.0.0` (its
 `test/sitefile-fixture.test.mjs` (packfile#19). It is an **uncompressed
 b2 Web Bundle**, not packfile's own gzip-wrapped archive format, so it goes
 through `fromWebBundle()` from `lib/web-bundle.mjs`, not `fromArchive()`.
+The test also gzips it and reads it with plain `fromArchive(buffer)`: since
+packfile#22 (unreleased), `fromArchive()` takes its base from the bundle's
+primary URL, `https://site.example/` here.
 
 `sitefile-0.0.0.json` lists the expected files (as `fromWebBundle(buf, {
 baseURL: "https://site.example/" })` keys them), with their byte sizes and

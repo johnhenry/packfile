@@ -13,7 +13,8 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import * as wbn from "wbn";
 import { fromWebBundle } from "../lib/web-bundle.mjs";
-import { createRouter } from "../index.mjs";
+import { gzipSync } from "node:zlib";
+import { createRouter, fromArchive } from "../index.mjs";
 
 const fixture = (name) => new URL(`./fixtures/${name}`, import.meta.url);
 const buffer = new Uint8Array(readFileSync(fixture("sitefile-0.0.0.wbn")));
@@ -50,6 +51,17 @@ await test("sitefile@0.0.0 Web Bundle fixture", async (t) => {
       assert.equal(entry.hash, digest, `${path} hash`);
       assert.equal(sha256(entry.data), digest, `${path} bytes`);
     }
+  });
+
+  await t.test("fromArchive reads it gzipped, with no options (base from the primary URL, #18)", async () => {
+    const map = await fromArchive(new Uint8Array(gzipSync(buffer)));
+    assert.deepEqual([...map.keys()].sort(), Object.keys(expected.files).sort());
+    for (const [path, { sha256: digest }] of Object.entries(expected.files)) {
+      assert.equal(map.get(path).hash, digest, `${path} hash`);
+    }
+    // Uncompressed, too, and an explicit baseURL gives the same result.
+    const plain = await fromArchive(buffer, { compressed: false, baseURL: BASE });
+    assert.deepEqual([...plain.keys()].sort(), Object.keys(expected.files).sort());
   });
 
   await t.test("createRouter serves the pages, the binary, and 404s", async () => {
