@@ -137,9 +137,11 @@ await test("browser fromArchive: hardened against untrusted input", async (t) =>
   }
 
   await t.test("rejects an exchange outside the archive base URL", async () => {
+    // The base is derived from the primary URL's origin (#18), so an entry
+    // is foreign when it is on a different origin than the primary URL.
     const b = new wbn.BundleBuilder();
     b.addExchange("https://evil.example/x.txt", 200, { "Content-Type": "text/plain" }, "x");
-    b.setPrimaryURL("https://evil.example/x.txt");
+    b.setPrimaryURL("https://site.example/");
     const archive = new Uint8Array(gzipSync(b.createBundle()));
     await assert.rejects(() => browser.fromArchive(archive), { reason: "outside-base" });
   });
