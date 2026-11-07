@@ -612,7 +612,9 @@ another's router.
   published to npm). The resulting `.wbn` file is directly readable by this
   package's own `fromArchive()` (back into a flat path -> content map) and
   servable via `createRouter()`/`createWebBundleRouter()` -- no unpacking to
-  disk needed.
+  disk needed. File names containing `#`, `?` or `%` don't survive that
+  trip yet (johnhenry/fileable#20), and an empty `<Dir>` isn't kept (a Web
+  Bundle has no directory entries).
 - **[`@johnhenry/servable`](https://github.com/johnhenry/servable)** --
   `createRouter()` already returns a `(Request | path, ctx?) => Response`
   handler (it even aliases itself as `.fetch`), the exact shape servable's
@@ -629,9 +631,15 @@ another's router.
   `fromArchive(buffer, { compressed: false })` reads, and gzipping it gives
   this package's archive format. Sitefile has no runtime dependency on
   packfile; its `test/packfile-interop.test.ts` (packfile as a
-  devDependency) checks all three. The other direction, Sitefile importing
-  a `toArchive()` archive with `AS tree`, isn't supported yet
-  (johnhenry/sitefile#141).
+  devDependency) checks all three, and this repo's
+  `test/sitefile-fixture.test.mjs` reads a bundle made by the published
+  Sitefile (being added in #21). Known gaps: a `Request` for a non-ASCII path 404s in
+  `createRouter()`, so pass the path as a string (#20); `fromArchive()` reads
+  only bundles built for `https://packfile.invalid/` (#18, fix in #22); Sitefile's
+  `HEADER`/`REDIRECT` rules reach this package only as `/_headers` and
+  `/_redirects` files, not as response headers
+  (johnhenry/sitefile#144); and Sitefile can't yet import a `toArchive()`
+  archive with `AS tree` (johnhenry/sitefile#141).
 
 ## Internal formats
 
