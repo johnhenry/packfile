@@ -6,6 +6,7 @@ import {
   Files,
   ToFilesOptions,
   InvalidPathReason,
+  SkippedEntry,
 } from "./types.js";
 
 export {
@@ -16,6 +17,7 @@ export {
   Files,
   ToFilesOptions,
   InvalidPathReason,
+  SkippedEntry,
 };
 export {
   PackfileError,
@@ -75,6 +77,14 @@ export type BrowserFromArchiveOptions = {
    * duplicates after percent-decoding). `"throw"` (default) raises
    * `InvalidPathError`; `"skip"` silently drops the entry (first duplicate wins). */
   unsafePaths?: "throw" | "skip";
+  /** Absolute URL each exchange URL is made relative to. Default: the
+   * bundle's primary URL's root (origin + "/"), or
+   * `"https://packfile.invalid/"` (what `toArchive()` writes) when the bundle
+   * has none. An entry outside it is unsafe (`reason: "outside-base"`). */
+  baseURL?: string;
+  /** With `unsafePaths: "skip"`, called once per skipped entry. Throw from it
+   * to abort the read. (With `"throw"`, the first unsafe entry rejects.) */
+  onSkip?: (skipped: SkippedEntry) => void;
 };
 
 /** Serializes a file Map to a (by default gzip-compressed) Web Bundle. */

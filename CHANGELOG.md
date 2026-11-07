@@ -7,6 +7,16 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+Planned for the next minor release (0.3.0).
+
+### Added
+
+- **`fromArchive(buffer, { baseURL, onSkip })`** in `.` and `./browser` ([#18](https://github.com/johnhenry/packfile/issues/18)). `baseURL` is the absolute URL exchange URLs are made relative to, so a gzip(Web Bundle) built for a real site (e.g. Sitefile's `EXPORT ... AS wbn BASE https://example.com/`) reads back without dropping down to `./web-bundle`. `onSkip({ url, reason })` is called for each entry left out (outside the base, unsafe path, duplicate); throw from it to abort. In `./browser` it applies with `unsafePaths: "skip"`. `fromWebBundle()` accepts `onSkip` too. New exported type `SkippedEntry`. The `compressed`/`compress` alias is unchanged.
+
+### Changed
+
+- **Behavior: without `baseURL`, `fromArchive()` derives the base from the bundle's primary URL** (its root, origin + "/"), falling back to `https://packfile.invalid/` when there is none. Archives written by `toArchive()` use that invalid base as their primary URL, so they read back exactly as before. Bundles written elsewhere for a real origin, which used to read back as an empty map (Node) or throw `InvalidPathError` with `reason: "outside-base"` (`./browser`), now read back. Entries on any other origin are still skipped or rejected. No wire-format change.
+
 ## [0.2.0] - 2026-10-12
 
 - Add browser-safe build exporters, Vite and Rollup/Rolldown plugins, and `packfile export` for completed build directories ([#14](https://github.com/johnhenry/packfile/issues/14), commit [0f96410](https://github.com/johnhenry/packfile/commit/0f96410faf92749d5ae56f3d29b3caa416289fef)).
