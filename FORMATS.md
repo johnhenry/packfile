@@ -263,9 +263,10 @@ read path.
 confirmed by reading the code, not assumed from the CBOR framing above.
 
 - **Node** (`lib/compression.mjs`): `node:zlib`'s `gzip`/`gunzip` directly.
-  `compressObject(buffer, level = zlib.constants.Z_DEFAULT_COMPRESSION)`
-  accepts a numeric compression level (0-9, or the zlib default `-1`,
-  passed through to `zlib.gzip`'s `{ level }` option).
+  `compressObject(buffer, level = DEFAULT_COMPRESSION_LEVEL)` (6, zlib's
+  default, pinned since #27) accepts a numeric compression level (0-9, or
+  `-1`, passed through to `zlib.gzip`'s `{ level }` option). Both
+  implementations overwrite the gzip header's OS byte with 3 (Unix).
 - **Browser** (`lib/compression.browser.mjs`): the Web
   `CompressionStream`/`DecompressionStream` APIs, explicitly parameterized
   with `format = "gzip"` (so, same wire format as the Node side, not a
