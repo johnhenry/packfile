@@ -78,6 +78,13 @@ npx @johnhenry/packfile serve <path-to-file> [port]
 
 This command serves the compiled file at `<path-to-file>` on the specified `[port]` (default is 3000).
 
+`serve` and `decompress` read either packfile's own gzip-wrapped archive
+(what `compress` and `export` write) or a plain Web Bundle, such as
+sitefile's `EXPORT … AS wbn` output; the first bytes decide. A plain bundle
+is read against its primary URL's origin, so a bundle without a primary URL
+(sitefile writes one only when the site has `/index.html`) and with a `BASE`
+other than `https://packfile.invalid/` reads back empty.
+
 ## Export a build as `.wbn`
 
 Install `@johnhenry/packfile` as a development dependency. These adapters package

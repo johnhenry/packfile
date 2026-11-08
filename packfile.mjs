@@ -14,6 +14,10 @@ function log(level, message) {
   console[level](`[${timestamp}] ${level.toUpperCase()}: ${message}`);
 }
 
+// toArchive() and `export` write gzip(Web Bundle); other tools (sitefile's
+// `EXPORT … AS wbn`) write a plain Web Bundle. Read either, by the gzip magic.
+const isGzip = (bytes) => bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+
 const [, , command, ...args] = process.argv;
 
 try {
@@ -48,7 +52,7 @@ try {
       }
       log("info", `Starting decompression of file ${args[0]}`);
       const data = await readFile(args[0]);
-      await decompileDirectory(data, args[1], true);
+      await decompileDirectory(data, args[1], isGzip(data));
       log("info", `Successfully decompressed file ${args[0]} to folder ${args[1]}`);
       break;
     }
@@ -59,7 +63,7 @@ try {
       const port = args[1] ? parseInt(args[1]) : 3000;
       log("info", `Starting server for file ${args[0]} on port ${port}`);
       const archiveData = await readFile(args[0]);
-      const files = await fromArchive(archiveData, { compressed: true });
+      const files = await fromArchive(archiveData, { compressed: isGzip(archiveData) });
       const router = createRouter(files, { alias: { "/": "index.html" } });
 
       const server = createServer(async (req, res) => {
