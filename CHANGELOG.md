@@ -7,6 +7,10 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+### Changed
+
+- `fromArchive()` in `.` and `./browser` defaults to `compressed: "auto"`: it gunzips when the bytes start with the gzip magic (`1f 8b`) and otherwise reads a plain Web Bundle. `true`/`false` still force. `decompileDirectory()` defaults to `"auto"` too, and the CLI uses the default instead of its own check. The Node `fromArchive()` now also accepts an `ArrayBuffer`, as its types already said ([#28](https://github.com/johnhenry/packfile/issues/28)).
+
 ### Fixed
 
 - `toArchive()` (`.` and `./browser`) and `toWebBundle()` are reproducible across machines: entries are sorted by path instead of following the Map's insertion order (`readdir` order), the gzip OS byte is fixed to 3 (Unix) instead of zlib's build-time value (19 on macOS), and the default level is pinned to 6. Archive bytes change once compared with 0.2.1 for maps not already in sorted order and for anything gzipped on macOS ([#27](https://github.com/johnhenry/packfile/issues/27)).

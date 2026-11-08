@@ -11,5 +11,6 @@ export function compileDirectory(
 export function decompileDirectory(
   compiledData: Buffer | ArrayBuffer | Uint8Array,
   outputPath: string,
-  compressed?: boolean
+  /** Default `"auto"` (gzip magic bytes); `true`/`false` force. */
+  compressed?: boolean | "auto"
 ): Promise<void>;

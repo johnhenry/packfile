@@ -21,6 +21,7 @@ async function check(): Promise<void> {
   const back: Map<string, FileEntry> = fromWebBundle(wb, { baseURL: "https://x.example/" });
   const archive: Buffer = await toArchive(back, { compressed: false });
   await fromArchive(archive, { compress: false });
+  await fromArchive(archive, { compressed: "auto" });
   await fromArchive(archive, {
     baseURL: "https://example.com/",
     onSkip: ({ url, reason }) => console.warn(url, reason),

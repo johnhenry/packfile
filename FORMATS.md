@@ -105,11 +105,12 @@ version, and framing -- `wbn`'s own decoder checks for a literal `🌐📦`
 magic value and an approved version string before parsing anything else
 (`node_modules/wbn/lib/decoder.js`) -- but that's `wbn`'s format
 guarantee, not something this package added on top. The *gzip* wrapping
-this package applies around it still has no framing of its own: the two
-ends of a round trip must still agree out-of-band on whether the buffer is
-gzip-compressed (`toArchive`/`fromArchive`'s `compress`/`compressed`
-options, both default `true`) -- that part of the original gap is
-unchanged.
+this package applies around it is detected by gzip's own magic bytes
+(`1f 8b`, RFC 1952): since #28 `fromArchive()` (`.` and `./browser`)
+defaults to `compressed: "auto"`, gunzipping when the buffer starts with
+them and otherwise parsing it as a plain Web Bundle (which starts with a
+CBOR array header, never `1f`). `compressed: true`/`false` still force
+either way; `toArchive()`'s `compress` still defaults to `true`.
 
 **Produced by:** `lib/to-archive.mjs`'s `toArchive(map, opts)`, a thin
 wrapper around `lib/web-bundle.mjs`'s `toWebBundle()` with the fixed
@@ -132,8 +133,8 @@ recorded on macOS is checked on Linux CI (`test/reproducible.test.mjs`).
 
 **Consumed by:** `lib/from-archive.mjs`'s `fromArchive(buffer, opts)`, a
 thin wrapper around the same bundle-to-`FilesMap` loop `fromWebBundle()`
-uses (`lib/bundle-to-files.mjs`). Decompresses (if `compressed: true`, the
-default) via `lib/compression.mjs`'s `deCompressObject`, then parses via
+uses (`lib/bundle-to-files.mjs`). Decompresses (if `compressed` is `true`,
+or `"auto"` -- the default -- and the bytes start with the gzip magic) via `lib/compression.mjs`'s `deCompressObject`, then parses via
 `wbn.Bundle` and strips a base back off each exchange's URL to recover the
 relative path. Since #18 that base is chosen by `resolveArchiveBase()`
 (`lib/path-safety.mjs`, shared with the browser reader): an explicit

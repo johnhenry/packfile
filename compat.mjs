@@ -15,7 +15,7 @@ export const compileDirectory = async (directoryPath, options = {}) => {
   return toArchive(map, { compress, compressionLevel });
 };
 
-export const decompileDirectory = async (compiledData, outputPath, compressed = true) => {
+export const decompileDirectory = async (compiledData, outputPath, compressed = "auto") => {
   const map = await fromArchive(compiledData, { compressed });
   for (const [relativePath, entry] of map) {
     const fullPath = join(outputPath, relativePath);

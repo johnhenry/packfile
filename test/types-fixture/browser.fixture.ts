@@ -24,6 +24,8 @@ async function assertBrowserTypes(): Promise<void> {
   const compressed: Uint8Array = await toArchive(map);
   const uncompressed: Uint8Array = await toArchive(map, { compressed: false });
   await toArchive(map, { compress: false });
+  await fromArchive(uncompressed, { compressed: "auto" });
+  await fromArchive(uncompressed, { compress: "auto" });
 
   const roundTripped: Map<string, FileEntry> = await fromArchive(compressed, {
     maxEntries: DEFAULT_LIMITS.maxEntries,

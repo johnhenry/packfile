@@ -243,7 +243,7 @@ const buffer = await toArchive(files);
 
 Deserializes an archive back to a file Map. Options:
 
-- `compressed` (default `true`; `compress` is accepted as an alias).
+- `compressed` (default `"auto"`; `compress` is accepted as an alias): `"auto"` gunzips when the bytes start with the gzip magic `1f 8b` and otherwise reads them as a plain Web Bundle, so both packfile's archives and plain `.wbn` files read without options. `true`/`false` force either way.
 - `baseURL`: the absolute URL each exchange URL is made relative to. By default it is the bundle's primary URL's root (origin + `/`), or `https://packfile.invalid/` (the internal base `toArchive()` writes, also as its primary URL) when the bundle has none. So archives from `toArchive()` and a gzip(Web Bundle) built for a real site with a primary URL both read back without it. Pass it when a bundle's entries live somewhere other than its primary URL's origin, or under a sub-path (`https://example.com/app/` gives keys relative to `app/`).
 - `onSkip({ url, reason })`: called once for each entry that is left out. Throw from it to abort instead.
 
@@ -357,7 +357,7 @@ const router = createRouter(files);
 | `unsafePaths` | `"throw"` | `"throw"` raises `InvalidPathError`; `"skip"` drops the entry (first duplicate wins) |
 | `onSkip` | none | with `"skip"`, called as `onSkip({ url, reason })` for each dropped entry; throw from it to abort |
 | `baseURL` | primary URL's root, else `https://packfile.invalid/` | the base exchange URLs are made relative to; anything outside it is unsafe (`reason: "outside-base"`). Same default as the Node entry. |
-| `compressed` | `true` | `false` if the bytes are a raw Web Bundle |
+| `compressed` | `"auto"` | gunzip if the bytes start with `1f 8b`, else read a plain Web Bundle; `true`/`false` force |
 
 Paths are validated after percent-decoding, so `%2e%2e`, `%5c` and `%00` cannot slip through: `..`/`.`/empty segments, absolute paths, backslashes, NUL/control characters, query/fragment, foreign origins and entries that collide after decoding are all rejected (`InvalidPathError.reason` says which). Input that is not a gzip stream or Web Bundle raises `InvalidArchiveError`. All errors extend `PackfileError` and carry a stable `code` (`ERR_PACKFILE_INVALID_PATH`, `ERR_PACKFILE_LIMIT`, `ERR_PACKFILE_INVALID_ARCHIVE`); `DEFAULT_LIMITS` is exported.
 
@@ -665,8 +665,8 @@ another's router.
   and `decompress` read plain bundles; since sitefile 0.0.1, sitefile writes
   the gzip itself with `EXPORT … AS wbn COMPRESSION gzip` or `-o
   site.wbn.gz` (johnhenry/sitefile#143). So a sitefile bundle with any `BASE`
-  reads with plain `fromArchive(buffer)` (pass `{ compressed: false }` for a
-  plain one). With packfile 0.2.0, `fromArchive()` reads only bundles built
+  reads with plain `fromArchive(buffer)`, gzipped or plain (`compressed`
+  defaults to `"auto"` since #28). With packfile 0.2.0, `fromArchive()` reads only bundles built
   for `https://packfile.invalid/`. sitefile has no runtime dependency on
   packfile; its `test/packfile-interop.test.ts` (packfile as a
   devDependency) checks these paths, and this repo's

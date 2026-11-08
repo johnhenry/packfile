@@ -60,10 +60,12 @@ export const DEFAULT_LIMITS: Readonly<{
 }>;
 
 export type BrowserFromArchiveOptions = {
-  /** Default `true`. Set `false` if `buffer` is an uncompressed Web Bundle. Canonical name. */
-  compressed?: boolean;
+  /** Default `"auto"`: gunzip when the bytes start with the gzip magic
+   * (`1f 8b`), else read them as a plain Web Bundle. `true`/`false` force
+   * either way (`maxTotalSize` applies in every case). Canonical name. */
+  compressed?: boolean | "auto";
   /** Alias of `compressed`. */
-  compress?: boolean;
+  compress?: boolean | "auto";
   /** Reject archives with more entries than this (`ArchiveLimitError`,
    * `limit: "entries"`). Default `DEFAULT_LIMITS.maxEntries`. */
   maxEntries?: number;
