@@ -25,6 +25,7 @@ import { compressObject } from "./lib/compression.browser.mjs";
 import { getContentType } from "./lib/mime.mjs";
 import { encodePath } from "./lib/path-safety.mjs";
 import { aliasedOption } from "./lib/options.mjs";
+import { sortedEntries } from "./lib/reproducible.mjs";
 import { readArchiveSafely, ARCHIVE_BASE_URL, DEFAULT_LIMITS } from "./lib/safe-archive.mjs";
 import * as wbn from "wbn";
 
@@ -45,8 +46,9 @@ export const fromArchive = (buffer, opts = {}) => readArchiveSafely(buffer, opts
 export const toArchive = async (map, opts = {}) => {
   const compress = aliasedOption(opts, "compress", "compressed", true);
 
+  // Same order as lib/web-bundle.mjs: sorted by path, not insertion order.
   const builder = new wbn.BundleBuilder();
-  for (const [path, entry] of map) {
+  for (const [path, entry] of sortedEntries(map)) {
     const url = new URL(encodePath(path), ARCHIVE_BASE_URL).toString();
     builder.addExchange(url, 200, { "Content-Type": getContentType(path) }, entry.data);
   }

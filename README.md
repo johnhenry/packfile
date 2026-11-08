@@ -233,7 +233,7 @@ const entry = await files.get('index.html'); // reads from disk
 
 ### `toArchive(map, options?)`
 
-Serializes a file Map to a compressed archive buffer -- `gzip(application/webbundle)`, via the real `wbn` package. Options: `compress` (default `true`; `compressed` is accepted as an alias), `compressionLevel`. Resolves to a `Buffer`.
+Serializes a file Map to a compressed archive buffer -- `gzip(application/webbundle)`, via the real `wbn` package. Options: `compress` (default `true`; `compressed` is accepted as an alias), `compressionLevel`. Resolves to a `Buffer`. Output is reproducible: entries are written sorted by path (not in the Map's insertion order), gzip uses level 6 unless `compressionLevel` says otherwise, and the gzip header's OS byte is always 3 (Unix), so the same files give the same bytes on macOS and Linux. Compressed bytes are only guaranteed stable for the same zlib (a different Node major or a browser's `CompressionStream` may deflate differently); `compress: false` output is stable everywhere.
 
 ```js
 const buffer = await toArchive(files);
