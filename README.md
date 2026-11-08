@@ -379,7 +379,7 @@ same input `createRouter()` takes) and you just want to point an
 It mints one `blob:` URL per file and rewrites HTML (`href`, `src`,
 `srcset`, `poster`, `formaction`) and CSS (`url(...)`, `@import`)
 references so they resolve to the right file's blob URL instead of
-404ing. In `.js`/`.mjs`/`.cjs` files, relative ES-module specifiers --
+404ing. In `.js`/`.mjs`/`.cjs` files, relative and root-relative ES-module specifiers (`./x.js`, `../x.js`, `/x.js`; root-relative ones resolve against the files map's root, as in HTML and CSS) --
 static `import ... from './x.js'`, `export ... from`, `export * from`,
 side-effect `import './x.js'`, and `import('./x.js')` with a string literal
 -- are rewritten to the dependency's blob URL, dependency-first. Specifiers
@@ -462,11 +462,13 @@ for free:
   importing itself) is reported via `onUnresolvedReference` (`reason:
   "cycle"`) and left as the original relative text, which will not resolve
   from a `blob:` URL. Everything else in the graph is rewritten.
-- Only string-literal **relative** specifiers (`./`, `../`) in JS are
-  rewritten. Bare specifiers, absolute URLs, `/root-relative` specifiers,
-  template-literal or computed `import(expr)` and `new URL('./x', import.meta.url)`
-  are untouched (use an import map). A `?query`/`#hash` on a relative JS
-  specifier is dropped. JS the lexer cannot parse is left as-is and reported
+- Only string-literal **relative** (`./`, `../`) and **root-relative**
+  (`/x.js`) specifiers in JS are rewritten. Bare specifiers, absolute and
+  protocol-relative (`//host/x.js`) URLs, template-literal or computed
+  `import(expr)` and `new URL('./x', import.meta.url)` are untouched (use an
+  import map). A root-relative specifier that is not in the files map is
+  reported (`reason: "missing"`) and left as written. A `?query`/`#hash` on a
+  rewritten JS specifier is dropped. JS the lexer cannot parse is left as-is and reported
   (`reason: "unparseable"`).
 
 ## Web Bundle / Isolated Web App primitives (`./web-bundle`)

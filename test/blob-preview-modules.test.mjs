@@ -106,6 +106,41 @@ await test("createBlobPreview: ES module specifier rewriting", async (t) => {
     p.dispose();
   });
 
+  await t.test("root-relative specifiers (/x.js) resolve against the files map root (#13)", async () => {
+    const q = quiet();
+    const p = await createBlobPreview(mapOf({
+      "index.html": `<script type="module" src="/app/main.js"></script>`,
+      "app/main.js": `import { c } from "/common.js";\nexport * from '/lib/x.js?v=1';\nimport "./local.js";\nconst m = await import("/lazy.js");\nimport net from "//cdn.example/n.js";\nimport gone from "/gone.js";`,
+      "app/local.js": `import "/common.js";`,
+      "common.js": `export const c = 1;`,
+      "lib/x.js": `export const x = 2;`,
+      "lazy.js": `export const z = 3;`,
+    }), { onUnresolvedReference: q.cb });
+    const main = await textOf(p.resolve("app/main.js"));
+    assert.ok(main.includes(`from "${p.resolve("common.js")}"`), main);
+    assert.ok(main.includes(`from '${p.resolve("lib/x.js")}'`), "query dropped, like relative specifiers");
+    assert.ok(main.includes(`import "${p.resolve("app/local.js")}"`), main);
+    assert.ok(main.includes(`import("${p.resolve("lazy.js")}")`), main);
+    assert.ok(main.includes(`from "//cdn.example/n.js"`), "protocol-relative is a network URL: untouched");
+    assert.ok(main.includes(`from "/gone.js"`), "missing target left as written");
+    assert.ok((await textOf(p.resolve("app/local.js"))).includes(p.resolve("common.js")));
+    assert.deepEqual(q.seen, [{ reason: "missing", targetPath: "gone.js", fromPath: "app/main.js" }]);
+    p.dispose();
+  });
+
+  await t.test("a root-relative import cycle is reported like a relative one", async () => {
+    const q = quiet();
+    const p = await createBlobPreview(mapOf({
+      "index.html": `<script type="module" src="a.js"></script>`,
+      "a.js": `import "/b.js";`,
+      "b.js": `import "/a.js";`,
+    }), { onUnresolvedReference: q.cb });
+    assert.ok((await textOf(p.resolve("a.js"))).includes(p.resolve("b.js")));
+    assert.equal(await textOf(p.resolve("b.js")), `import "/a.js";`);
+    assert.deepEqual(q.seen.map((i) => i.reason), ["cycle"]);
+    p.dispose();
+  });
+
   await t.test("strings/comments that merely look like imports are not touched; unparseable JS is left as-is and reported", async () => {
     const q = quiet();
     const okSrc = `// import "./b.js"\nconst s = 'import x from "./b.js"';\n/* export * from "./b.js" */`;
