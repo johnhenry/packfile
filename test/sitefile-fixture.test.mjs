@@ -85,10 +85,10 @@ await test("sitefile@0.0.0 Web Bundle fixture", async (t) => {
     assert.equal(bin.headers.get("content-type"), "application/octet-stream");
     assert.deepEqual(new Uint8Array(await bin.arrayBuffer()), Uint8Array.from({ length: 256 }, (_, i) => i));
 
-    // The non-ASCII page is served by its decoded path. A Request for it
-    // (pathname is percent-encoded) currently 404s: createRouter does not
-    // decode the pathname -- tracked separately, see packfile#20.
-    const nested = await router("/docs/ünï/page.html");
+    // The non-ASCII page is served for a real Request (percent-encoded
+    // pathname, decoded by createRouter since #20) as well as by string path.
+    assert.equal((await router("/docs/ünï/page.html")).status, 200);
+    const nested = await router(new Request(`${BASE}docs/ünï/page.html`));
     assert.equal(nested.status, 200);
     assert.equal(nested.headers.get("content-type"), "text/html");
     assert.equal(sha256(new Uint8Array(await nested.arrayBuffer())), expected.files["docs/ünï/page.html"].sha256);
