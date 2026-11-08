@@ -14,6 +14,7 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
 ### Fixed
 
 - `toArchive()` (`.` and `./browser`) and `toWebBundle()` are reproducible across machines: entries are sorted by path instead of following the Map's insertion order (`readdir` order), the gzip OS byte is fixed to 3 (Unix) instead of zlib's build-time value (19 on macOS), and the default level is pinned to 6. Archive bytes change once compared with 0.2.1 for maps not already in sorted order and for anything gzipped on macOS ([#27](https://github.com/johnhenry/packfile/issues/27)).
+- The test suite passes on case-insensitive file systems (macOS APFS): the directory-export validation test uses a backslash filename instead of `A.txt`/`a.txt`, and case collisions are tested in memory through `exportFiles()` ([#25](https://github.com/johnhenry/packfile/issues/25)). Test-only.
 
 ## [0.2.1] - 2026-11-08
 

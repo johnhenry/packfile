@@ -148,11 +148,22 @@ test('Vite export waits for ordinary closeBundle writers and preserves last arch
 });
 
 test('failed directory validation leaves the prior destination untouched', async t => {
+  // The invalid name must be creatable on every CI file system: `A.txt` next
+  // to `a.txt` can't exist on case-insensitive APFS/NTFS (#25), but a
+  // backslash is a legal filename character on macOS and Linux and is always
+  // rejected by exportFiles() (reason "backslash").
   const root = await temp(t);
   const dest = join(root, 'app.wbn');
   await writeFile(dest, 'previous');
-  await writeFile(join(root, 'A.txt'), 'a');
-  await writeFile(join(root, 'a.txt'), 'b');
-  await assert.rejects(exportDirectory(root, dest), { reason: 'case-collision' });
+  await writeFile(join(root, 'ok.txt'), 'a');
+  await writeFile(join(root, 'a\\b.txt'), 'b');
+  await assert.rejects(exportDirectory(root, dest), { reason: 'backslash' });
   assert.equal(await readFile(dest, 'utf8'), 'previous');
+});
+
+test('exportFiles rejects case-only collisions independent of the file system', async () => {
+  // Case collisions can only be put on disk on a case-sensitive file system,
+  // so the rule itself is checked in memory.
+  await assert.rejects(exportFiles({ 'A.txt': 'a', 'a.txt': 'b' }), { reason: 'case-collision' });
+  await assert.rejects(exportFiles({ 'Dir/x.txt': 'a', 'dir/y.txt': 'b', 'DIR': 'c' }), { reason: 'file-directory-collision' });
 });
