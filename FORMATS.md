@@ -116,6 +116,20 @@ wrapper around `lib/web-bundle.mjs`'s `toWebBundle()` with the fixed
 `ARCHIVE_BASE_URL`. Compression (gzip via `lib/compression.mjs`) is applied
 after building the bundle, default on, unchanged from before.
 
+**Reproducibility (#27).** The same files give the same archive bytes on
+any machine. Both writers (`lib/web-bundle.mjs`'s `toWebBundle()` and
+`browser.mjs`'s `toArchive()`) add exchanges sorted by path (code-unit
+order, `lib/reproducible.mjs`), not in the `Map`'s insertion order -- which,
+for `fromDirectory()`, is `readdir` order and differs per file system. The
+gzip layer pins level 6 (zlib's default, now written explicitly) and
+overwrites the header's OS byte with 3 (Unix): zlib sets it at build time
+(19 on macOS, 3 on Linux), and MTIME is already 0. What this does **not**
+guarantee: deflate output from a *different* zlib (another Node major, a
+system zlib, a browser's own `CompressionStream`, or an explicit
+`compressionLevel`) may differ; the uncompressed Web Bundle
+(`compress: false`) is the byte-stable artifact across those. A digest
+recorded on macOS is checked on Linux CI (`test/reproducible.test.mjs`).
+
 **Consumed by:** `lib/from-archive.mjs`'s `fromArchive(buffer, opts)`, a
 thin wrapper around the same bundle-to-`FilesMap` loop `fromWebBundle()`
 uses (`lib/bundle-to-files.mjs`). Decompresses (if `compressed: true`, the

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reaches 1.0.0.
 
+## [Unreleased]
+
+### Fixed
+
+- `toArchive()` (`.` and `./browser`) and `toWebBundle()` are reproducible across machines: entries are sorted by path instead of following the Map's insertion order (`readdir` order), the gzip OS byte is fixed to 3 (Unix) instead of zlib's build-time value (19 on macOS), and the default level is pinned to 6. Archive bytes change once compared with 0.2.1 for maps not already in sorted order and for anything gzipped on macOS ([#27](https://github.com/johnhenry/packfile/issues/27)).
+
 ## [0.2.1] - 2026-11-08
 
 ### Added
