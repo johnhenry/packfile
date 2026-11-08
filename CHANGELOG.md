@@ -11,6 +11,7 @@ Planned for the next minor release (0.3.0).
 
 ### Added
 
+- **The CLI's `serve` and `decompress` read a plain Web Bundle** as well as the gzip archive, chosen by the file's gzip magic bytes, so sitefile's `EXPORT … AS wbn` output serves directly. Before, both assumed gzip and failed with `incorrect header check`.
 - **`fromArchive(buffer, { baseURL, onSkip })`** in `.` and `./browser` ([#18](https://github.com/johnhenry/packfile/issues/18), PR [#22](https://github.com/johnhenry/packfile/pull/22)). `baseURL` is the absolute URL exchange URLs are made relative to, so a gzip(Web Bundle) built for a real site (e.g. Sitefile's `EXPORT ... AS wbn BASE https://example.com/`) reads back without dropping down to `./web-bundle`. `onSkip({ url, reason })` is called for each entry left out (outside the base, unsafe path, duplicate); throw from it to abort. In `./browser` it applies with `unsafePaths: "skip"`. `fromWebBundle()` accepts `onSkip` too. New exported type `SkippedEntry`. The `compressed`/`compress` alias is unchanged.
 
 ### Changed
