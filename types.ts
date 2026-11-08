@@ -40,10 +40,12 @@ export type SkippedEntry = {
 };
 
 export type FromArchiveOptions = {
-  /** Default `true`. Set `false` for an uncompressed Web Bundle. Canonical name. */
-  compressed?: boolean;
+  /** Default `"auto"`: gunzip when the bytes start with the gzip magic
+   * (`1f 8b`), else read them as a plain Web Bundle. `true`/`false` force
+   * either way. Canonical name. */
+  compressed?: boolean | "auto";
   /** Alias of `compressed`. */
-  compress?: boolean;
+  compress?: boolean | "auto";
   /** Absolute URL each exchange URL is made relative to. Default: the
    * bundle's primary URL's root (origin + "/"), or
    * `"https://packfile.invalid/"` (what `toArchive()` writes) when the bundle
