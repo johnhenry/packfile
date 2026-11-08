@@ -57,7 +57,7 @@ You can use the `packfile` CLI with the following commands:
 ### Compress a folder
 
 ```bash
-npx packfile compress <path-to-folder> <path-to-file>
+npx @johnhenry/packfile compress <path-to-folder> <path-to-file>
 ```
 
 This command compresses the contents of `<path-to-folder>` and saves the compressed data to `<path-to-file>`.
@@ -65,7 +65,7 @@ This command compresses the contents of `<path-to-folder>` and saves the compres
 ### Decompress a file
 
 ```bash
-npx packfile decompress <path-to-file> <path-to-folder>
+npx @johnhenry/packfile decompress <path-to-file> <path-to-folder>
 ```
 
 This command decompresses the contents of `<path-to-file>` and saves the decompressed files to `<path-to-folder>`.
@@ -73,7 +73,7 @@ This command decompresses the contents of `<path-to-file>` and saves the decompr
 ### Serve a compiled file
 
 ```bash
-npx packfile serve <path-to-file> [port]
+npx @johnhenry/packfile serve <path-to-file> [port]
 ```
 
 This command serves the compiled file at `<path-to-file>` on the specified `[port]` (default is 3000).
@@ -135,7 +135,7 @@ must be supplied by your build tool/plugins.
 ### CLI / Node directory export
 
 ```sh
-npx --package @johnhenry/packfile packfile export ./dist ./app.wbn
+npx @johnhenry/packfile export ./dist ./app.wbn
 ```
 
 ```js
@@ -184,17 +184,17 @@ The existing `./web-bundle` API remains available for raw Web Bundles.
 
 1. Compress a folder:
    ```bash
-   npx packfile compress ./static ./compiled.wbn
+   npx @johnhenry/packfile compress ./static ./compiled.wbn
    ```
 
 2. Decompress a file:
    ```bash
-   npx packfile decompress ./compiled.wbn ./decompressed
+   npx @johnhenry/packfile decompress ./compiled.wbn ./decompressed
    ```
 
 3. Serve a compiled file:
    ```bash
-   npx packfile serve ./compiled.wbn 8080
+   npx @johnhenry/packfile serve ./compiled.wbn 8080
    ```
 
 ## Node.js API
