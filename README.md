@@ -657,30 +657,28 @@ another's router.
   successor of `lemem`, prism's own original dependency for this, ported
   and renamed before prism itself was.
 - **[`@johnhenry/sitefile`](https://github.com/johnhenry/sitefile)** --
-  Sitefile's `EXPORT / AS wbn BASE <url>` writes a plain (not gzipped) b2
+  sitefile's `EXPORT / AS wbn BASE <url>` writes a plain (not gzipped) b2
   Web Bundle. `fromWebBundle(buffer, { baseURL })` from `./web-bundle` reads
   it back into exactly the exported files, and `createRouter()` serves it.
-  With the published versions (Sitefile 0.0.0, packfile 0.2.0),
-  `fromArchive()` reads only bundles built for `https://packfile.invalid/`:
-  export with that `BASE` and gzip the result (or pass
-  `{ compressed: false }`). Fixed on main, in the next release: `fromArchive()`
-  takes a `baseURL` option or, without it, the origin of the bundle's primary
-  URL (#18), and Sitefile writes the gzip itself with `EXPORT … AS wbn
-  COMPRESSION gzip` or `-o site.wbn.gz` (johnhenry/sitefile#143), so a
-  Sitefile bundle with any `BASE` reads with plain `fromArchive(buffer)`.
-  Sitefile has no runtime dependency on packfile; its
-  `test/packfile-interop.test.ts` (packfile as a devDependency) checks these
-  paths, and this repo's `test/sitefile-fixture.test.mjs` reads a bundle made
-  by the published Sitefile 0.0.0, with `fromWebBundle()` and, gzipped, with
-  `fromArchive()`. Known gaps: a `Request` for a non-ASCII path 404s in
-  `createRouter()`, so pass the path as a string (#20); in Sitefile 0.0.0,
-  `HEADER`/`REDIRECT` rules reach this package only as `/_headers` and
-  `/_redirects` files, not as response headers. Fixed on Sitefile's main, in
-  its next release (johnhenry/sitefile#144): each response carries its HEADER
+  Since packfile 0.2.1, `fromArchive()` takes a `baseURL` option or, without
+  it, the origin of the bundle's primary URL (#18), and the CLI's `serve`
+  and `decompress` read plain bundles; since sitefile 0.0.1, sitefile writes
+  the gzip itself with `EXPORT … AS wbn COMPRESSION gzip` or `-o
+  site.wbn.gz` (johnhenry/sitefile#143). So a sitefile bundle with any `BASE`
+  reads with plain `fromArchive(buffer)` (pass `{ compressed: false }` for a
+  plain one). With packfile 0.2.0, `fromArchive()` reads only bundles built
+  for `https://packfile.invalid/`. sitefile has no runtime dependency on
+  packfile; its `test/packfile-interop.test.ts` (packfile as a
+  devDependency) checks these paths, and this repo's
+  `test/sitefile-fixture.test.mjs` reads a bundle made by the published
+  sitefile 0.0.0, with `fromWebBundle()` and, gzipped, with `fromArchive()`.
+  Known gaps: a `Request` for a non-ASCII path 404s in `createRouter()`, so
+  pass the path as a string (#20). Since sitefile 0.0.1
+  (johnhenry/sitefile#144), each response in its bundles carries its HEADER
   values and exact-path REDIRECTs are 3xx responses with `location`, which
   `createWebBundleRouter()` serves (`createRouter()` serves a files map, so
   not these); splats, `200` rewrites and `404` rules stay in `/_redirects`.
-  Sitefile can't yet import a `toArchive()` archive with `AS tree`
+  sitefile can't yet import a `toArchive()` archive with `AS tree`
   (johnhenry/sitefile#141).
 
 ## Internal formats
