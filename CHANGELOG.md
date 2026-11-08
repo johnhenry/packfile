@@ -7,6 +7,10 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+### Added
+
+- `createBlobPreview()` rewrites root-relative ES-module specifiers (`import … from "/common.js"`, `export … from`, side-effect and string-literal dynamic `import()`) to the dependency's blob URL, resolved against the files map's root the same way HTML/CSS root-relative references already were. Protocol-relative `//host/x.js` stays untouched; a root-relative specifier with no matching file is now reported (`reason: "missing"`) and left as written ([#13](https://github.com/johnhenry/packfile/issues/13)).
+
 ### Changed
 
 - `fromArchive()` in `.` and `./browser` defaults to `compressed: "auto"`: it gunzips when the bytes start with the gzip magic (`1f 8b`) and otherwise reads a plain Web Bundle. `true`/`false` still force. `decompileDirectory()` defaults to `"auto"` too, and the CLI uses the default instead of its own check. The Node `fromArchive()` now also accepts an `ArrayBuffer`, as its types already said ([#28](https://github.com/johnhenry/packfile/issues/28)).

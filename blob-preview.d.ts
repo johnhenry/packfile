@@ -76,7 +76,8 @@ export type BlobPreview = {
 };
 
 /**
- * Relative ES-module specifiers in .js/.mjs/.cjs files (static `import`,
+ * Relative (`./`, `../`) and root-relative (`/x.js`, resolved against the
+ * files map's root) ES-module specifiers in .js/.mjs/.cjs files (static `import`,
  * `export ... from`, `export * from`, side-effect `import`, and string-literal
  * dynamic `import()`) are rewritten to the dependency's blob URL in
  * module-graph order; a cycle's closing edge is reported with reason
