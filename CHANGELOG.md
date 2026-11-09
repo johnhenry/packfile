@@ -7,6 +7,8 @@ and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-09
+
 ### Added
 
 - `createBlobPreview()` rewrites root-relative ES-module specifiers (`import … from "/common.js"`, `export … from`, side-effect and string-literal dynamic `import()`) to the dependency's blob URL, resolved against the files map's root the same way HTML/CSS root-relative references already were. Protocol-relative `//host/x.js` stays untouched; a root-relative specifier with no matching file is now reported (`reason: "missing"`) and left as written ([#13](https://github.com/johnhenry/packfile/issues/13)).
