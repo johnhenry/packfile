@@ -282,7 +282,7 @@ Returns a `(Request) => Promise<Response>` handler that serves files. Auto-sets 
 - `tryExtensions` — Array of extensions to try (e.g. `[".html"]`)
 - `fallback` — Fallback handler for unmatched routes
 
-A `Request`'s pathname is percent-decoded before lookup, so `new Request("https://site.example/docs/ünï/page.html")` finds the `docs/ünï/page.html` entry, and `alias` keys match the decoded path. A pathname that decoding would make unsafe or ambiguous (an encoded `/` as `%2F`, a backslash, NUL/control characters, a `.`/`..` segment, or a malformed `%` escape) is answered as not found (`fallback` if given, else 404). A string input is taken as an already-decoded path and is not decoded again. `createWebBundleRouter()` (`./web-bundle`) matches the bundle's encoded exchange URLs instead and is unchanged.
+A `Request`'s pathname is percent-decoded before lookup, so `new Request("https://site.example/docs/ünï/page.html")` finds the `docs/ünï/page.html` entry, and `alias` keys match the decoded path. A pathname that decoding would make unsafe or ambiguous (an encoded `/` as `%2F`, a backslash, NUL/control characters, a `.`/`..` segment, or a malformed `%` escape) is answered as not found (`fallback` if given, else 404). A string input is taken as an already-decoded path and is not decoded again. `createWebBundleRouter()` (`./web-bundle`) follows the same rules (see below).
 
 ```js
 const handler = createRouter(files, {
@@ -525,6 +525,8 @@ const bundle = new wbn.Bundle(bytes); // parse once, reuse across requests --
 const router = createWebBundleRouter(bundle, { baseURL: 'https://example.com/' });
 const response = await router('index.html'); // Cache-Control is the real, baked-in header
 ```
+
+Paths are matched **decoded on both sides**. A `Request`'s pathname is percent-decoded exactly as `createRouter()` does, and each exchange URL under `baseURL` is decoded the same way. So `/docs/ünï/page.html`, `/with%20space.txt`, `/a@b.txt` (which `toWebBundle()` stores as `a%40b.txt`) and lowercase escapes all match, whichever way the bundle's writer encoded them. `alias` keys match the decoded path. A pathname that decoding would make unsafe or ambiguous (`%2F`, a backslash, NUL/control characters, a `.`/`..` segment, a malformed `%` escape) is answered as not found (`fallback` if given, else 404). An exchange whose own URL decodes to such a path, or that lies outside `baseURL`, can't be reached by path. A `Request`'s pathname is taken relative to `baseURL` (the request's origin isn't compared with it). A string input is a decoded path, used as given. If nothing matches, it is tried once more as an already-encoded path resolved under `baseURL`, which was the behavior before #35.
 
 **Why this exists**: packfile was originally built with `wbn` in mind, then
 moved to a bespoke gzip+CBOR format when `wbn`/Web Bundles looked
